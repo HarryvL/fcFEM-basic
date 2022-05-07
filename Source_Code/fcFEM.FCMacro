@@ -25,6 +25,10 @@ import time
 
 if 'femTools' in sys.modules.keys():
     del(sys.modules['femTools'])
+    print("femTools in sys.modules.keys")
+else:
+    sys.path.append("/fcFEM/fcFEM-source") # put here the path to the fcFEM macros, if not the FreeCAD default
+    print("femTools path added")
 
 import femTools as ft
 

@@ -33,7 +33,7 @@ from femobjects import _FemMaterial
 import femtools.ccxtools as tools
 import Part as Part
 import sys
-from femtools.femutils import get_several_member as gsm
+from femtools.membertools import get_several_member as gsmem
 from femsolver.writerbase import FemInputWriter as iw
 import DraftVecUtils as DVU
 import scipy.linalg
@@ -49,7 +49,7 @@ def setUpAnalysis():
 
     doc = App.ActiveDocument
 
-    mesh = doc.getObject("FEMMeshGmsh").FemMesh
+    mesh = doc.getObject("Mesh").FemMesh
     if mesh == None:
         print("No Gmsh object. Please create one first")
         raise SystemExit ()
@@ -81,11 +81,26 @@ def setUpInput(doc, mesh, analysis):
     nocoord=np.asarray(mesh.Nodes.values()) # nocoord[nodeIndex] = [x-coord, y-coord, z-coord]
 
     # create element material array: materialbyElement maps element number -> E, nu
-    materials_lin = gsm(analysis, 'Fem::Material')
+    materials_lin = gsmem(analysis, 'Fem::MaterialCommon')
+
+    '''
+    class FemInputWriter():
+    def __init__(
+        self,
+        analysis_obj,
+        solver_obj,
+        mesh_obj,
+        member,
+        dir_name=None,
+        mat_geo_sets=None
+    '''
+    print(analysis)
+    print(doc.CalculiXccxTools)
+    print(doc.Mesh)
+    print(materials_lin)
+
     fiwc = iw(
-        analysis, doc.CalculiXccxTools, doc.FEMMeshGmsh, materials_lin,
-        None, None, None, None, None, None, None, None,
-        None, None, None, None, None, None, None, None, None
+        analysis, doc.CalculiXccxTools, doc.Mesh, materials_lin
     )
     fiwc.get_material_elements()
     materialbyElement = []
