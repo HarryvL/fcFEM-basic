@@ -33,8 +33,10 @@ from femobjects import _FemMaterial
 import femtools.ccxtools as tools
 import Part as Part
 import sys
-from femtools.membertools import get_several_member as gsmem
 from femsolver.writerbase import FemInputWriter as iw
+from femsolver.calculix import write_femelement_geometry
+from femsolver.calculix import write_femelement_material
+from femsolver.calculix import write_femelement_matgeosets
 import DraftVecUtils as DVU
 import scipy.linalg
 import math
@@ -42,12 +44,16 @@ import Fem
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
 import os
+from femmesh import meshsetsgetter
+from femtools import membertools
 
 np.set_printoptions(precision=5, linewidth=300)
 
 def setUpAnalysis():
 
     doc = App.ActiveDocument
+
+    print(doc)
 
     mesh = doc.getObject("Mesh").FemMesh
     if mesh == None:
@@ -72,6 +78,74 @@ def setUpAnalysis():
 def setUpInput(doc, mesh, analysis):
 
     analysis = doc.getObject("Analysis")
+    solver = doc.CalculiXccxTools
+    docmesh = doc.Mesh
+    member = membertools.AnalysisMember(analysis)
+
+    fiwc = iw(
+        analysis,
+        solver,
+        docmesh,
+        member
+    )
+
+    from femmesh import meshsetsgetter
+
+    meshdatagetter = meshsetsgetter.MeshSetsGetter(
+        analysis,
+        solver,
+        docmesh,
+        membertools.AnalysisMember(analysis),
+    )
+
+    import femsolver.calculix.writer as fcw
+
+    ccxwriter = fcw.FemInputWriterCcx(
+        analysis,
+        solver,
+        docmesh,
+        meshdatagetter.member,
+        None,
+        meshdatagetter.mat_geo_sets
+    )
+
+    print("ccxwriter: ", ccxwriter)
+
+    # print("dir(member): ", dir(member))
+    #
+    # print("mesh == docmesh: ", mesh == docmesh)
+
+    # print(member.mats_linear)
+    # print(docmesh)
+    # print(docmesh.FemMesh.Volumes)
+
+    # MatMesh = meshsetsgetter.MeshSetsGetter(
+    #          analysis,
+    #          solver,
+    #          docmesh,
+    #          member,
+    #      )
+
+    # print (dir(MatMesh))
+
+    # MatMesh.get_element_sets_material_and_femelement_geometry()
+    # MatMesh.get_mesh_sets()
+    #
+    # print(MatMesh.mat_geo_sets[0]["ccx_elset"])
+
+    # self.mat_geo_sets = [ {
+    #                        "ccx_elset" : [e1, e2, e3, ... , en] or elements set name strings
+    #                        "ccx_elset_name" : "ccx_identifier_elset"
+    #                        "mat_obj_name" : "mat_obj.Name"
+    #                        "ccx_mat_name" : "mat_obj.Material["Name"]"   !!! not unique !!!
+    #                        "beamsection_obj" : "beamsection_obj"         if exists
+    #                        "fluidsection_obj" : "fluidsection_obj"       if exists
+    #                        "shellthickness_obj" : shellthickness_obj"    if exists
+    #                        "beam_axis_m" : main local beam axis          for beams only
+    #                     },
+    #                     {}, ... , {} ]
+
+    # print(MatMesh.femelement_volumes_table)
 
     # create connextivity array elnodes for mapping local node number -> global node number
     elnodes = np.array([mesh.getElementNodes(el) for el in mesh.Volumes]) # elnodes[elementIndex] = [node1,...,Node10]
@@ -81,36 +155,78 @@ def setUpInput(doc, mesh, analysis):
     nocoord=np.asarray(mesh.Nodes.values()) # nocoord[nodeIndex] = [x-coord, y-coord, z-coord]
 
     # create element material array: materialbyElement maps element number -> E, nu
-    materials_lin = gsmem(analysis, 'Fem::MaterialCommon')
+    # materials_lin = gsmem(analysis, 'Fem::MaterialCommon')
 
-    '''
-    class FemInputWriter():
-    def __init__(
-        self,
-        analysis_obj,
-        solver_obj,
-        mesh_obj,
-        member,
-        dir_name=None,
-        mat_geo_sets=None
-    '''
-    print(analysis)
-    print(doc.CalculiXccxTools)
-    print(doc.Mesh)
-    print(materials_lin)
+    # class FemInputWriter():
+    # def __init__(
+    #     self,
+    #     analysis_obj,
+    #     solver_obj,
+    #     mesh_obj,
+    #     member,
+    #     dir_name=None,
+    #     mat_geo_sets=None
 
-    fiwc = iw(
-        analysis, doc.CalculiXccxTools, doc.Mesh, materials_lin
-    )
-    fiwc.get_material_elements()
+    # w = writer.FemInputWriterCcx(
+    #     self.analysis,
+    #     self.solver,
+    #     mesh_obj,
+    #     meshdatagetter.member,
+    #     self.directory,
+    #     meshdatagetter.mat_geo_sets
+
+    # def write_inp_file(self):
+    #
+    #     # get mesh set data
+    #     # TODO use separate method for getting the mesh set data
+    #     from femmesh import meshsetsgetter
+    #     meshdatagetter = meshsetsgetter.MeshSetsGetter(
+    #         self.analysis,
+    #         self.solver,
+    #         self.mesh,
+    #         membertools.AnalysisMember(self.analysis),
+    #     )
+    #     # save the sets into the member objects of the instanz meshdatagetter
+    #     meshdatagetter.get_mesh_sets()
+    #
+    #     # write input file
+    #     import femsolver.calculix.writer as iw
+    #     self.inp_file_name = ""
+    #     try:
+    #         inp_writer = iw.FemInputWriterCcx(
+    #             self.analysis,
+    #             self.solver,
+    #             self.mesh,
+    #             meshdatagetter.member,
+    #             self.working_dir,
+    #             meshdatagetter.mat_geo_sets
+    #         )
+    #         self.inp_file_name = inp_writer.write_solver_input()
+
+    # print(analysis)
+    # print(doc.CalculiXccxTools)
+    # print(doc.Mesh)
+    # print("dir(materials_lin[0][Object]): ", dir(materials_lin[0]["Object"]))
+    # print("materials_lin[0][Object].Material: ", materials_lin[0]["Object"].Material)
+
+
+    print("\n dir(fiwc):\n ", dir(fiwc))
+
+
+    # print("\n FIW Finite Element Table:\n", mt.get_femelement_volumes_table(docmesh))
+
     materialbyElement = []
     po_keys=[] # parentobject[el] = parent material object for element el
     po_values=[]
     counter=0
+    print("\nNumber of material objects: ", len(fiwc.material_objects))
+    print(fiwc.material_objects)
     for object in fiwc.material_objects:
+        print(dir(object['Object']))
         E = float(App.Units.Quantity(object['Object'].Material['YoungsModulus']).getValueAs('MPa'))
         Nu = float(object['Object'].Material['PoissonRatio'])
-        for el in object['FEMElements']:
+        print("Material Object: ", object['Object'].Name, "   E= ",E,"   Nu= ", Nu)
+        for el in object['Object'].Elements:
             po_keys.append(el)
             po_values.append(object['Object'].Name)
             counter += 1
