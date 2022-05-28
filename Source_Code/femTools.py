@@ -24,53 +24,136 @@ import FreeCAD as App
 import FreeCADGui as Gui
 import numpy as np
 import ObjectsFem
-import FemGui
 from femmesh import meshtools as mt
 from feminout import importToolsFem as itf
-import femsolver.calculix.writer as ccxw
-import ObjectsFem as objectsfem
-from femobjects import _FemMaterial
-import femtools.ccxtools as tools
 import Part as Part
-import sys
-from femsolver.writerbase import FemInputWriter as iw
-from femsolver.calculix import write_femelement_geometry
-from femsolver.calculix import write_femelement_material
-from femsolver.calculix import write_femelement_matgeosets
-import DraftVecUtils as DVU
+from femsolver.writerbase import FemInputWriter
 import scipy.linalg
 import math
 import Fem
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
-import os
 from femmesh import meshsetsgetter
 from femtools import membertools
+import keyboard
+from threading import Lock
+from threading import Thread
+
+# plot the load-deflection curve
+# def plot(un, lbd):
+#     prn_upd("enter plot routine")
+#     class Index(object):
+#         def stop(self, event):
+#             self.cnt = False
+#             lock.release()
+#             plt.close()
+#         def add(self, event):
+#             self.cnt = True
+#             lock.release()
+#             plt.close()
+#
+#     callback = Index()
+#     callback.cnt = False
+#     fig, ax = plt.subplots()
+#     plt.subplots_adjust(bottom=0.2)
+#     prn_upd("un", un)
+#     prn_upd("lbd", lbd)
+#     ax.plot(un, lbd, '-ok')
+#     ax.set(xlabel='displacement [mm]', ylabel='load factor [-]',
+#            title='')
+#     ax.grid()
+#     axstop = plt.axes([0.7, 0.05, 0.1, 0.075])
+#     axadd = plt.axes([0.81, 0.05, 0.1, 0.075])
+#     bstop = Button(axstop, 'stop')
+#     bstop.on_clicked(callback.stop)
+#     badd = Button(axadd, 'add')
+#     badd.on_clicked(callback.add)
+#     prn_upd("show plot")
+#     plt.show()
+#     lock.acquire()
+#     plt.close()
+#     return callback.cnt
+
+
+class Btn_Handler():
+    def stop(caller, event):
+        prn_upd(event)
+        caller.cnt = False
+
+    def add(caller, event):
+        prn_upd(event)
+        caller.cnt = True
+
+class Plot_thread(Thread):
+    def __init__(self, un, lbd):
+        super(Plot_thread, self).__init__()
+        self.Un = un
+        self.Lbd = lbd
+        self.cnt = False
+
+    def run(self):
+        handler = Btn_Handler()
+        fig, ax = plt.subplots()
+        plt.subplots_adjust(bottom=0.2)
+        prn_upd("un", self.Un)
+        prn_upd("lbd", self.Lbd)
+        ax.plot(self.Un, self.Lbd, '-ok')
+        ax.set(xlabel='displacement [mm]', ylabel='load factor [-]',
+               title='')
+        ax.grid()
+        axstop = plt.axes([0.7, 0.05, 0.1, 0.075])
+        axadd = plt.axes([0.81, 0.05, 0.1, 0.075])
+        bstop = Button(axstop, 'stop')
+        bstop.on_clicked(handler.stop)
+        badd = Button(axadd, 'add')
+        badd.on_clicked(handler.add)
+        prn_upd("show plot")
+        plt.show()
+        #     lock.acquire()
+        #     plt.close()
+        #     return handler.cnt
+
+        return
+
+
+# For example:
+#
+# class ThreadBrowser(threading.Thread):
+#     def __init__(self, user, password):
+#         super(ThreadBrowser, self).__init__()
+#         self.User = user
+#         self.Pass = password
+#
+#     def run(self):
+#         print(self.User, self.Pass)
+#
+# The ThreadBrowser can then be constructed naturally as ThreadBrowser(username, password) and started with t.start() as before.
+
 
 np.set_printoptions(precision=5, linewidth=300)
+
+def prn_upd(*args):
+    for obj in args:
+        print(str(obj), end = '')
+    print('\n')
+    Gui.updateGui()
 
 def setUpAnalysis():
 
     doc = App.ActiveDocument
-
-    print(doc)
-
-    mesh = doc.getObject("Mesh").FemMesh
+    mesh = doc.getObject("FEMMeshGmsh").FemMesh
     if mesh == None:
-        print("No Gmsh object. Please create one first")
+        prn_upd("No Gmsh object. Please create one first")
         raise SystemExit ()
-
     analysis = doc.getObject("Analysis")
     if analysis == None:
-        print("No Analysis object. Please create one first")
+        prn_upd("No Analysis object. Please create one first")
         raise SystemExit ()
-
     # purge result objects
     for obj in App.ActiveDocument.Objects:
         name = obj.Name[:11]
         if name in ['MechanicalR', 'Result_Mesh']:
             doc.removeObject(obj.Name)
-
     doc.recompute()
 
     return doc, mesh, analysis
@@ -78,19 +161,28 @@ def setUpAnalysis():
 def setUpInput(doc, mesh, analysis):
 
     analysis = doc.getObject("Analysis")
-    solver = doc.CalculiXccxTools
-    docmesh = doc.Mesh
+    solver = doc.getObject("SolverCcxTools")
+    docmesh = doc.getObject("FEMMeshGmsh")
     member = membertools.AnalysisMember(analysis)
 
-    fiwc = iw(
+    # create connextivity array elnodes for mapping local node number -> global node number
+    prn_upd("create connextivity array elnodes for mapping local node number -> global node number")
+    elnodes = np.array([mesh.getElementNodes(el) for el in mesh.Volumes]) # elnodes[elementIndex] = [node1,...,Node10]
+    elo = dict(zip(mesh.Volumes, range(len(mesh.Volumes)))) # elo : {elementNumber : elementIndex}
+
+    # create nodal coordinate array nocoord for node number -> (x,y,z)
+    ncv =list(mesh.Nodes.values())
+    nocoord = np.asarray([[v.x, v.y, v.z] for v in ncv]) # nocoord[nodeIndex] = [x-coord, y-coord, z-coord]
+
+    # get access to material sets: fiwc.material_objects
+    fiwc = FemInputWriter(
         analysis,
         solver,
-        docmesh,
+        Fem,
         member
     )
 
-    from femmesh import meshsetsgetter
-
+    # get access to element sets: meshdatagetter.mat_geo_sets
     meshdatagetter = meshsetsgetter.MeshSetsGetter(
         analysis,
         solver,
@@ -98,144 +190,44 @@ def setUpInput(doc, mesh, analysis):
         membertools.AnalysisMember(analysis),
     )
 
-    import femsolver.calculix.writer as fcw
+    meshdatagetter.get_mesh_sets()
 
-    ccxwriter = fcw.FemInputWriterCcx(
-        analysis,
-        solver,
-        docmesh,
-        meshdatagetter.member,
-        None,
-        meshdatagetter.mat_geo_sets
-    )
+    if len(fiwc.material_objects) == 1:
+        element_sets = [mesh.Volumes]
+    else:
+        element_sets = [mgs["ccx_elset"] for mgs in meshdatagetter.mat_geo_sets]
 
-    print("ccxwriter: ", ccxwriter)
-
-    # print("dir(member): ", dir(member))
-    #
-    # print("mesh == docmesh: ", mesh == docmesh)
-
-    # print(member.mats_linear)
-    # print(docmesh)
-    # print(docmesh.FemMesh.Volumes)
-
-    # MatMesh = meshsetsgetter.MeshSetsGetter(
-    #          analysis,
-    #          solver,
-    #          docmesh,
-    #          member,
-    #      )
-
-    # print (dir(MatMesh))
-
-    # MatMesh.get_element_sets_material_and_femelement_geometry()
-    # MatMesh.get_mesh_sets()
-    #
-    # print(MatMesh.mat_geo_sets[0]["ccx_elset"])
-
-    # self.mat_geo_sets = [ {
-    #                        "ccx_elset" : [e1, e2, e3, ... , en] or elements set name strings
-    #                        "ccx_elset_name" : "ccx_identifier_elset"
-    #                        "mat_obj_name" : "mat_obj.Name"
-    #                        "ccx_mat_name" : "mat_obj.Material["Name"]"   !!! not unique !!!
-    #                        "beamsection_obj" : "beamsection_obj"         if exists
-    #                        "fluidsection_obj" : "fluidsection_obj"       if exists
-    #                        "shellthickness_obj" : shellthickness_obj"    if exists
-    #                        "beam_axis_m" : main local beam axis          for beams only
-    #                     },
-    #                     {}, ... , {} ]
-
-    # print(MatMesh.femelement_volumes_table)
-
-    # create connextivity array elnodes for mapping local node number -> global node number
-    elnodes = np.array([mesh.getElementNodes(el) for el in mesh.Volumes]) # elnodes[elementIndex] = [node1,...,Node10]
-    elo = dict(zip(mesh.Volumes, range(len(mesh.Volumes)))) # elo : {elementNumber : elementIndex}
-
-    # create nodal coordinate array nocoord for node number -> (x,y,z)
-    nocoord=np.asarray(mesh.Nodes.values()) # nocoord[nodeIndex] = [x-coord, y-coord, z-coord]
-
-    # create element material array: materialbyElement maps element number -> E, nu
-    # materials_lin = gsmem(analysis, 'Fem::MaterialCommon')
-
-    # class FemInputWriter():
-    # def __init__(
-    #     self,
-    #     analysis_obj,
-    #     solver_obj,
-    #     mesh_obj,
-    #     member,
-    #     dir_name=None,
-    #     mat_geo_sets=None
-
-    # w = writer.FemInputWriterCcx(
-    #     self.analysis,
-    #     self.solver,
-    #     mesh_obj,
-    #     meshdatagetter.member,
-    #     self.directory,
-    #     meshdatagetter.mat_geo_sets
-
-    # def write_inp_file(self):
-    #
-    #     # get mesh set data
-    #     # TODO use separate method for getting the mesh set data
-    #     from femmesh import meshsetsgetter
-    #     meshdatagetter = meshsetsgetter.MeshSetsGetter(
-    #         self.analysis,
-    #         self.solver,
-    #         self.mesh,
-    #         membertools.AnalysisMember(self.analysis),
-    #     )
-    #     # save the sets into the member objects of the instanz meshdatagetter
-    #     meshdatagetter.get_mesh_sets()
-    #
-    #     # write input file
-    #     import femsolver.calculix.writer as iw
-    #     self.inp_file_name = ""
-    #     try:
-    #         inp_writer = iw.FemInputWriterCcx(
-    #             self.analysis,
-    #             self.solver,
-    #             self.mesh,
-    #             meshdatagetter.member,
-    #             self.working_dir,
-    #             meshdatagetter.mat_geo_sets
-    #         )
-    #         self.inp_file_name = inp_writer.write_solver_input()
-
-    # print(analysis)
-    # print(doc.CalculiXccxTools)
-    # print(doc.Mesh)
-    # print("dir(materials_lin[0][Object]): ", dir(materials_lin[0]["Object"]))
-    # print("materials_lin[0][Object].Material: ", materials_lin[0]["Object"].Material)
-
-
-    print("\n dir(fiwc):\n ", dir(fiwc))
-
-
-    # print("\n FIW Finite Element Table:\n", mt.get_femelement_volumes_table(docmesh))
+    # prn_upd("element_sets\n", element_sets)
 
     materialbyElement = []
     po_keys=[] # parentobject[el] = parent material object for element el
     po_values=[]
     counter=0
-    print("\nNumber of material objects: ", len(fiwc.material_objects))
-    print(fiwc.material_objects)
-    for object in fiwc.material_objects:
-        print(dir(object['Object']))
-        E = float(App.Units.Quantity(object['Object'].Material['YoungsModulus']).getValueAs('MPa'))
-        Nu = float(object['Object'].Material['PoissonRatio'])
-        print("Material Object: ", object['Object'].Name, "   E= ",E,"   Nu= ", Nu)
-        for el in object['Object'].Elements:
+
+    prn_upd("Number of material objects", len(fiwc.material_objects))
+
+    for object in enumerate(fiwc.material_objects):
+        E = float(App.Units.Quantity(object[1]['Object'].Material['YoungsModulus']).getValueAs('MPa'))
+        Nu = float(object[1]['Object'].Material['PoissonRatio'])
+        prn_upd("Material Object: ", object[1]['Object'].Name, "   E= ",E,"   Nu= ", Nu)
+        Gui.updateGui()
+        object_index = object[0]
+        elset = element_sets[object_index]
+        for el in elset:
             po_keys.append(el)
-            po_values.append(object['Object'].Name)
+            po_values.append(object[1]['Object'].Name)
             counter += 1
             materialbyElement.append([el, E, Nu]) # materialbyElement[elementIndex] = [elementNumber, E, Nu]
     parentobject=dict(zip(po_keys,po_values))
 
+    # prn_upd("\nmaterialbyElement: ", materialbyElement)
+
     # determine elements connected to a node using FC API
-    fet=mt.get_femelement_table(mesh) # fet is dictionary: { elementid : [ nodeid, nodeid, ... , nodeid ] }
-    net=mt.get_femnodes_ele_table(mesh.Nodes, fet) # net is dictionary: {nodeID : [[eleID, NodePosition], [], ...], nodeID : [[], [], ...], ...}
+    fet=mt.get_femelement_table(mesh)
+    # fet is dictionary: { elementid : [ nodeid, nodeid, ... , nodeid ] }
+    net=mt.get_femnodes_ele_table(mesh.Nodes, fet)
+    # net is dictionary: {nodeID : [[eleID, binary node position], [], ...], nodeID : [[], [], ...], ...}
+    # node0 has binary node position 2^0 = 1, node1 = 2^1 = 2, ..., node10 = 2^10 = 1024
 
     # set up interface element connectivity
     nodecount=len(nocoord)
@@ -246,7 +238,7 @@ def setUpInput(doc, mesh, analysis):
             num_BF_els=len(App.ActiveDocument.BooleanFragments.Objects)
             num_Mat_obs=len(fiwc.material_objects)
             if num_BF_els != num_Mat_obs:
-                print("Each BooleanFragment element needs its own material object")
+                prn_upd("Each BooleanFragment element needs its own material object")
                 raise SystemExit()
             shapecontacts=[]
             tk=[]
@@ -277,7 +269,7 @@ def setUpInput(doc, mesh, analysis):
                                         nocoord = np.append(nocoord, [nocoord[node-1]], axis=0) # add coordinates for new nodes
 
             twins = dict(zip(tk, tv)) # twins : {oldnode : [newnode, face number]}
-            print("\nInterface twins: {}".format(twins))
+            # prn_upd("\nInterface twins: {}".format(twins))
 
             for facecontacts in shapecontacts:
                 for face in facecontacts:
@@ -289,9 +281,7 @@ def setUpInput(doc, mesh, analysis):
 
             interface_elements=np.asarray(interface_elements) # add interface elements for the face between obj1 and obj2
 
-    print("number of interface elements: {}".format(len(interface_elements)))
-    for ie in interface_elements:
-        print(ie)
+    prn_upd("number of interface elements: {}".format(len(interface_elements)))
 
     # reconnect volume elements to new interface nodes
     if interface_elements != []:
@@ -316,10 +306,17 @@ def setUpInput(doc, mesh, analysis):
     # create boundary condition array dispfaces
     dispfaces=[]
     for obj in App.ActiveDocument.Objects:
-        if obj.isDerivedFrom('Fem::ConstraintDisplacement'):
+        if obj.isDerivedFrom('Fem::ConstraintFixed') or obj.isDerivedFrom('Fem::ConstraintDisplacement'):
+
             bcnodes= []
-            bctype=[obj.xFree,obj.yFree,obj.zFree]
-            bcvalue=[obj.xDisplacement,obj.yDisplacement,obj.zDisplacement]
+
+            if obj.isDerivedFrom('Fem::ConstraintFixed'):
+                bctype=[False, False, False]
+                bcvalue=[0,0,0]
+            else:
+                bctype=[obj.xFree,obj.yFree,obj.zFree]
+                bcvalue=[obj.xDisplacement,obj.yDisplacement,obj.zDisplacement]
+
             for part, boundaries in obj.References:
                 for boundary in boundaries:
                     ref = part.Shape.getElement(boundary)
@@ -335,10 +332,13 @@ def setUpInput(doc, mesh, analysis):
                             if bcn not in twins:
                                 bcnodes.append(bcn)
                     else:
-                        print("No Boundaries Found")
+                        prn_upd("No Boundaries Found")
                     edge=list(set(bc) & set(twins))
+                    # prn_upd("edge: ", edge)
                     interior=list(set(bc) - set(twins))
-                    #print("\nset(bc) {}, \nset(twins) {}, \nedge of boundary: {}, \ninterior of boundary: {}".format(bc, twins, edge, interior))
+                    # prn_upd("interior: ", interior)
+
+                    #prn_upd("\nset(bc) {}, \nset(twins) {}, \nedge of boundary: {}, \ninterior of boundary: {}".format(bc, twins, edge, interior))
                     for node in edge:
                         for elem in net[node]:
                             elnum=elo[elem[0]]
@@ -351,6 +351,9 @@ def setUpInput(doc, mesh, analysis):
             bcnodes = list(dict.fromkeys(bcnodes)) #remove duplicates in bcnodes
             if bcnodes != []: dispfaces.append([bcnodes,bctype,bcvalue])
 
+            # prn_upd("bcnodes: ", bcnodes)
+
+    Gui.updateGui()
     # create loaded faces and their global node numbers
     loadfaces_keys = []
     loadfaces_values = []
@@ -368,9 +371,10 @@ def setUpInput(doc, mesh, analysis):
                             loadfaces_keys.append(faceID)
                             loadfaces_values.append([list(mesh.getElementNodes(faceID)),sign*obj.Pressure])
                     else:
-                        print("No Faces with Pressure Loads")
+                        prn_upd("No Faces with Pressure Loads")
     loadfaces=dict(zip(loadfaces_keys,loadfaces_values))
 
+    # prn_upd("\nload faces: ", loadfaces)
 
     # re-order element nodes
     for el in elnodes:
@@ -611,6 +615,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
     #   calculate element load vectors for pressure and add to global vector
     for face in loadfaces:
         pressure = loadfaces[face][1]
+        # prn_upd(pressure)
         xl = np.array([nocoord[nd-1] for nd in loadfaces[face][0]]).T
 
         # integrate element load vector
@@ -674,7 +679,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
         esm = np.zeros((36, 36), dtype=np.float64)
         dmatloc = np.diag([kn*kmax,ks*kmax,ks*kmax])
         # integrate element matrix (np6: Newton Cotes, gp6: Gauss)
-        for ip in np6:
+        for ip in gp6:
             xi = ip[0]
             et = ip[1]
             xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xl)
@@ -702,7 +707,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
         loadsumx+=glv[dof]
         loadsumy+=glv[dof+1]
         loadsumz+=glv[dof+2]
-    print("\nsumFx {} sumFy {} sumFz {}".format(loadsumx,loadsumy, loadsumz))
+    prn_upd("sumFx {} sumFy {} sumFz {}".format(loadsumx,loadsumy, loadsumz))
 
     return gsm, glv, kmax
 
@@ -720,9 +725,9 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
 
 
     if np.min(np.diag(gsm)) <= 0.0:
-        print("non poitive definite matrix - check input")
+        prn_upd("non poitive definite matrix - check input")
         for i in range(ndof):
-            if gsm[i, i] == 0.0: print(
+            if gsm[i, i] == 0.0: prn_upd(
                 "DOF: {}; Coord: {} not attached".format(i, nocoord[i / 3]))
         raise SystemExit()
 
@@ -737,16 +742,16 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
 
     # Cholesky decomposition of the global stiffness matrix and elastic solution
     # TODO: Apply reverse Cuthill McKee and banded Cholesky to speed things up
-    # TODO: Experiment with Intel Distributin for Python (Math Kernal Library) to optimize speed
+    # TODO: Experiment with Intel Distribution for Python (Math Kernal Library) to optimize speed
     t0 = time.time()
     L=scipy.linalg.cho_factor(gsm,True,True,False)
     t1 = time.time()
     ue=scipy.linalg.cho_solve(L,glv,True,False)
     t2 = time.time()
-    print("Cholesky Decomposition: {} s, Elastic Solution: {} s".format(t1-t0,t2-t1))
+    prn_upd("Cholesky Decomposition: {} s, Elastic Solution: {} s".format(t1-t0,t2-t1))
 
     # initiate analysis
-    dl0=1.0/nstep
+    dl0=1.0/nstep # nstep == 1 execute an elastic analysis
     dl=dl0
     du=dl*ue
 
@@ -758,11 +763,24 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
     step = -1
     cnt = True
 
+    un = []
+
+
+    if (interface_elements!=[] or nstep == 1.0):
+        # perform an elastic (one-step) analysis only
+        step = 0
+        out_disp = 1
+        un = [0.]
+        lbd = np.append(lbd, 1.0)
+        disp = np.append(disp, [ue], axis=0)
+        un.append(np.max(np.abs(disp[1])))
+        cnt = False
+
     while (cnt == True):
         for istep in (range(nstep)):
             step += 1
             restart=0
-            print("\nStep: {}".format(step))
+            prn_upd("Step: {}".format(step))
             # Riks control vector
             a=du
             # lbd = load level
@@ -782,7 +800,7 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
             # out-of-balance error
             error=rnorm/qnorm
             iterat=0
-            print("Iteration: {}, Error: {}".format(iterat, error))
+            prn_upd("Iteration: {}, Error: {}".format(iterat, error))
 
             while error>error_max:
                 iterat+=1
@@ -803,7 +821,7 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
                 r = fixdof * (lbd[step + 1] * qex - qin)
                 rnorm = np.linalg.norm(r)
                 error = rnorm / qnorm
-                print("Iteration: {}, Error: {}".format(iterat,error))
+                prn_upd("Iteration: {}, Error: {}".format(iterat,error))
                 if iterat>iterat_max:
                     # scale down
                     if restart == 4: raise SystemExit()
@@ -839,67 +857,45 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
                 du*=scale_up
 
         # maximum displacement increment for plotting load-displacement curve
-        un=[]
+        un = []
         for index,load in enumerate(lbd):
             un.append(np.max(np.abs(disp[index])))
 
         # plot load-displacement curve - TODO: move to output / post-processing
         cnt = plot(un, lbd)
 
+        # pt = Plot_thread(un, lbd)
+        # pt.start()
+        # cnt = pt.cnt
+        # print(cnt)
+        # cnt=False
+
+
     out = min(step+1, abs(int(out_disp)))
     if out_disp > 0:
         u_out = un[out]
         l_out = lbd[out]
-        print("\n************************************************************\n")
-        print("Step: {0:2d} Load level: {1:.3f} Displacement: {2:.4e}".format(out, l_out,
+        # prn_upd("\n************************************************************\n")
+        prn_upd("Step: {0:2d} Load level: {1:.3f} Displacement: {2:.4e}".format(out, l_out,
                                                       u_out))
-        print("\n************************************************************\n")
+        # prn_upd("\n************************************************************\n")
         return disp[out], sig, trac
 
     else:
         u_out = un[out]-un[out-1]
         l_out = lbd[out]-lbd[out-1]
-        print("\n************************************************************\n")
-        print("Step: {0:2d} Load level increment: {1:.3f} Displacement increment: {2:.4e}".format(out, l_out,
+        # prn_upd("\n************************************************************\n")
+        prn_upd("Step: {0:2d} Load level increment: {1:.3f} Displacement increment: {2:.4e}".format(out, l_out,
                                                       u_out))
-        print("\n************************************************************\n")
+        # prn_upd("\n************************************************************\n")
         return disp[out]-disp[out-1], sig, trac
 
 
-# plot the load-deflection curve
-def plot(un, lbd):
-    class Index(object):
-        def stop(self, event):
-            self.cnt = False
-            plt.close()
-        def add(self, event):
-            self.cnt = True
-            plt.close()
-
-    callback = Index()
-    callback.cnt=False
-    fig, ax = plt.subplots()
-    plt.subplots_adjust(bottom=0.2)
-    ax.plot(un, lbd, '-ok', color='black')
-    ax.set(xlabel='displacement [mm]', ylabel='load factor [-]',
-           title='')
-    ax.grid()
-    axstop = plt.axes([0.7, 0.05, 0.1, 0.075])
-    axadd = plt.axes([0.81, 0.05, 0.1, 0.075])
-    bstop = Button(axstop, 'stop')
-    bstop.on_clicked(callback.stop)
-    badd = Button(axadd, 'add')
-    badd.on_clicked(callback.add)
-    # fig.savefig("test.png")
-    plt.show()
-
-    return callback.cnt
-
 # modify the global stiffness matrix and load vector for displacement boundary conditions
-def bcGSM(gsm, glv, dispfaces):
+def bcGSM(gsm, glv, dis):
     dim=len(glv)
     zero=np.zeros((dim), dtype=np.float64)
-    dis=np.asarray(dispfaces)
+
     # fixdof=1: DOF is free; fixdof=0: DOF is fixed - used in calculation of residual load
     fixdof= np.ones((dim), dtype=int)
 
@@ -1150,7 +1146,7 @@ def pasteResults(doc, elnodes, nocoord, interface_elements, dis, tet10stress, co
     analysis = doc.getObject("Analysis")
 
     if analysis == None:
-        print("No Analysis object. Please create one first")
+        prn_upd("No Analysis object. Please create one first")
         raise SystemExit ()
 
     resVol = analysis.addObject(ObjectsFem.makeResultMechanical(doc))[0]
