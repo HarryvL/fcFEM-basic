@@ -36,8 +36,8 @@ from matplotlib.widgets import Button
 from femmesh import meshsetsgetter
 from femtools import membertools
 import keyboard
-from threading import Lock
-from threading import Thread
+# from threading import Lock
+# from threading import Thread
 
 # plot the load-deflection curve
 # def plot(un, lbd):
@@ -75,45 +75,45 @@ from threading import Thread
 #     return callback.cnt
 
 
-class Btn_Handler():
-    def stop(caller, event):
-        prn_upd(event)
-        caller.cnt = False
-
-    def add(caller, event):
-        prn_upd(event)
-        caller.cnt = True
-
-class Plot_thread(Thread):
-    def __init__(self, un, lbd):
-        super(Plot_thread, self).__init__()
-        self.Un = un
-        self.Lbd = lbd
-        self.cnt = False
-
-    def run(self):
-        handler = Btn_Handler()
-        fig, ax = plt.subplots()
-        plt.subplots_adjust(bottom=0.2)
-        prn_upd("un", self.Un)
-        prn_upd("lbd", self.Lbd)
-        ax.plot(self.Un, self.Lbd, '-ok')
-        ax.set(xlabel='displacement [mm]', ylabel='load factor [-]',
-               title='')
-        ax.grid()
-        axstop = plt.axes([0.7, 0.05, 0.1, 0.075])
-        axadd = plt.axes([0.81, 0.05, 0.1, 0.075])
-        bstop = Button(axstop, 'stop')
-        bstop.on_clicked(handler.stop)
-        badd = Button(axadd, 'add')
-        badd.on_clicked(handler.add)
-        prn_upd("show plot")
-        plt.show()
-        #     lock.acquire()
-        #     plt.close()
-        #     return handler.cnt
-
-        return
+# class Btn_Handler():
+#     def stop(caller, event):
+#         prn_upd(event)
+#         caller.cnt = False
+#
+#     def add(caller, event):
+#         prn_upd(event)
+#         caller.cnt = True
+#
+# class Plot_thread(Thread):
+#     def __init__(self, un, lbd):
+#         super(Plot_thread, self).__init__()
+#         self.Un = un
+#         self.Lbd = lbd
+#         self.cnt = False
+#
+#     def run(self):
+#         handler = Btn_Handler()
+#         fig, ax = plt.subplots()
+#         plt.subplots_adjust(bottom=0.2)
+#         prn_upd("un", self.Un)
+#         prn_upd("lbd", self.Lbd)
+#         ax.plot(self.Un, self.Lbd, '-ok')
+#         ax.set(xlabel='displacement [mm]', ylabel='load factor [-]',
+#                title='')
+#         ax.grid()
+#         axstop = plt.axes([0.7, 0.05, 0.1, 0.075])
+#         axadd = plt.axes([0.81, 0.05, 0.1, 0.075])
+#         bstop = Button(axstop, 'stop')
+#         bstop.on_clicked(handler.stop)
+#         badd = Button(axadd, 'add')
+#         badd.on_clicked(handler.add)
+#         prn_upd("show plot")
+#         plt.show()
+#         #     lock.acquire()
+#         #     plt.close()
+#         #     return handler.cnt
+#
+#         return
 
 
 # For example:
@@ -862,13 +862,7 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
             un.append(np.max(np.abs(disp[index])))
 
         # plot load-displacement curve - TODO: move to output / post-processing
-        cnt = plot(un, lbd)
-
-        # pt = Plot_thread(un, lbd)
-        # pt.start()
-        # cnt = pt.cnt
-        # print(cnt)
-        # cnt=False
+        cnt=plot(un, lbd)
 
 
     out = min(step+1, abs(int(out_disp)))
@@ -890,6 +884,35 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
         # prn_upd("\n************************************************************\n")
         return disp[out]-disp[out-1], sig, trac
 
+
+# plot the load-deflection curve
+def plot(un, lbd):
+    class Index(object):
+        def stop(self, event):
+            self.cnt = False
+            plt.close()
+        def add(self, event):
+            self.cnt = True
+            plt.close()
+
+    callback = Index()
+    callback.cnt=False
+    fig, ax = plt.subplots()
+    plt.subplots_adjust(bottom=0.2)
+    ax.plot(un, lbd, '-ok')
+    ax.set(xlabel='displacement [mm]', ylabel='load factor [-]',
+           title='')
+    ax.grid()
+    axstop = plt.axes([0.7, 0.05, 0.1, 0.075])
+    axadd = plt.axes([0.81, 0.05, 0.1, 0.075])
+    bstop = Button(axstop, 'stop')
+    bstop.on_clicked(callback.stop)
+    badd = Button(axadd, 'add')
+    badd.on_clicked(callback.add)
+    # fig.savefig("test.png")
+    plt.show()
+
+    return callback.cnt
 
 # modify the global stiffness matrix and load vector for displacement boundary conditions
 def bcGSM(gsm, glv, dis):
