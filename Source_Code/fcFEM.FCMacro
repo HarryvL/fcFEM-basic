@@ -23,6 +23,10 @@
 import sys
 import time
 import FreeCADGui as Gui
+import cProfile
+import pstats
+from pstats import SortKey
+
 
 import matplotlib.pyplot as plt
 
@@ -46,6 +50,7 @@ else:
 
 import femTools as ft
 
+
 fmt = "{0:10.3f}"
 
 timer = [["extract information from FreeCAD objects....................... " + fmt + " seconds", [ ]],
@@ -57,9 +62,9 @@ timer = [["extract information from FreeCAD objects....................... " + f
          ["calculate internal load vector................................. " + fmt + " seconds", [ ]]]
 
 # material input values - TODO: merge with FEM WB input dialogues
-gravity = -0.0e-6   # specific gravity acting in z-direction [N/mm3] = [1.0e-6 kN/m3]
-sig_yield = 0.5     # yield stress [MPa] for volume elements (von Mises material)
-shr_yield = 0.02      # yield stress [MPa] for interface elements (Coulomb material)
+gravity = -0.0e-6    # specific gravity acting in z-direction [N/mm3] = [1.0e-6 kN/m3]
+sig_yield = 250.0    # yield stress [MPa] for volume elements (von Mises material)
+shr_yield = 0.02     # yield stress [MPa] for interface elements (Coulomb material)
 kn = 1.0             # interface elastic normal stiffness factor (0.0 < kn <1.0)
 ks = 1.0             # interface elastic shear stiffness factor (0.0 < ks <1.0)
 
@@ -81,6 +86,8 @@ t1=time.time()
 timer[0][1]=t1-t0
 prn_upd("extract information from FreeCAD objects - time taken:  ", t1-t0, "  seconds")
 
+# cProfile.runctx('ft.setUpAnalysis()', globals(), locals())
+
 # prepare finite element input
 prn_upd("prepare finite element input")
 t0=time.time()
@@ -89,23 +96,40 @@ t1=time.time()
 timer[1][1]=t1-t0
 prn_upd("prepare finite element input - time taken:  ", t1-t0, "  seconds")
 
+# cProfile.runctx('ft.setUpInput(doc, mesh, analysis)', globals(), locals())
+
 # calculate the global stiffness matrix and global load vector
 prn_upd("extract information from FreeCAD objects")
 t0=time.time()
 globalStiffnessMatrix, globalLoadVector, kmax = ft.calcGSM(elNodes, noCoord, elMat, loadFaces, interface_elements, gravity, kn, ks)
+# cProfile.runctx('globalStiffnessMatrix, globalLoadVector, kmax = ft.calcGSM(elNodes, noCoord, elMat, loadFaces, interface_elements, gravity, kn, ks)', globals(), locals())
+
 t1=time.time()
 timer[2][1]=t1-t0
 prn_upd("extract information from FreeCAD objects - time taken:  ", t1-t0, "  seconds")
+
 
 # solve the global stiffness matrix equation
 prn_upd("solve the global stiffness matrix equation")
 Gui.updateGui()
 t0=time.time()
-displacements, stresses, tractions = ft.calcDisp (elNodes, noCoord, dispFaces, elMat, interface_elements, kmax, globalStiffnessMatrix, globalLoadVector,
-                                                    nstep, iterat_max, error_max, relax, scale_re, scale_up, scale_dn, sig_yield, shr_yield, kn, ks, out_disp)
+
+displacements, stresses, tractions = ft.calcDisp (elNodes, noCoord, dispFaces, elMat, interface_elements, kmax,
+                                                  globalStiffnessMatrix, globalLoadVector, nstep, iterat_max,
+                                                  error_max, relax, scale_re, scale_up, scale_dn, sig_yield, shr_yield,
+                                                  kn, ks, out_disp)
+
+# cProfile.runctx('displacements, stresses, tractions = ft.calcDisp (elNodes, noCoord, dispFaces, elMat,\
+#                                                   interface_elements, kmax,\
+#                                                   globalStiffnessMatrix, globalLoadVector, nstep, iterat_max,\
+#                                                   error_max, relax, scale_re, scale_up, scale_dn, sig_yield, shr_yield,\
+#                                                   kn, ks, out_disp)', globals(), locals())
+
 t1=time.time()
 timer[3][1]=t1-t0
 prn_upd("solve the global stiffness matrix equation - time taken:  ", t1-t0, "  seconds")
+
+
 
 # map stresses to nodal points
 prn_upd("map stresses to nodal points")
