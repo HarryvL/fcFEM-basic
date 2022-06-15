@@ -83,7 +83,7 @@ def setUpInput(doc, mesh, analysis):
     # create connextivity array elnodes for mapping local node number -> global node number
     prn_upd("create connextivity array elnodes for mapping local node number -> global node number")
     elnodes = np.array([mesh.getElementNodes(el) for el in mesh.Volumes]) # elnodes[elementIndex] = [node1,...,Node10]
-    print("type(elnodes[0][0]): {}".format(type(elnodes[0][0])))
+    # print("type(elnodes[0][0]): {}".format(type(elnodes[0][0])))
     # print("elnodes {}".format(elnodes))
     elo = dict(zip(mesh.Volumes, range(len(mesh.Volumes)))) # elo : {elementNumber : elementIndex}
 
@@ -219,7 +219,7 @@ def setUpInput(doc, mesh, analysis):
                     elnodes[elo[elnum]][nonum] = twins[node][0] # connect element to new nodes
 
     else:
-        interface_elements = [[0,0,0,0,0,0,0,0,0,0,0,0]]         # signature required for numba
+        interface_elements = np.asarray([[0,0,0,0,0,0,0,0,0,0,0,0]])         # signature required for numba
 
     noce=np.zeros((len(nocoord)), dtype=np.int16)
 
@@ -279,8 +279,27 @@ def setUpInput(doc, mesh, analysis):
 
     Gui.updateGui()
     # create loaded faces and their global node numbers
-    loadfaces_keys = []
-    loadfaces_values = []
+    # loadfaces_keys = []
+    # loadfaces_values = []
+    # for obj in App.ActiveDocument.Objects:
+    #     if obj.isDerivedFrom('Fem::ConstraintPressure'):
+    #         if obj.Reversed:
+    #             sign=1
+    #         else:
+    #             sign=-1
+    #         for part, boundaries in obj.References:
+    #             for boundary in boundaries:
+    #                 ref = part.Shape.getElement(boundary)
+    #                 if type(ref)==Part.Face:
+    #                     for faceID in mesh.getFacesByFace(ref):
+    #                         loadfaces_keys.append(faceID)
+    #                         loadfaces_values.append([list(mesh.getElementNodes(faceID)),sign*obj.Pressure])
+    #                 else:
+    #                     prn_upd("No Faces with Pressure Loads")
+    # loadfaces=dict(zip(loadfaces_keys,loadfaces_values))
+
+    lf = [[0,0,0,0,0,0]]
+    pr = [0.]
     for obj in App.ActiveDocument.Objects:
         if obj.isDerivedFrom('Fem::ConstraintPressure'):
             if obj.Reversed:
@@ -292,12 +311,14 @@ def setUpInput(doc, mesh, analysis):
                     ref = part.Shape.getElement(boundary)
                     if type(ref)==Part.Face:
                         for faceID in mesh.getFacesByFace(ref):
-                            loadfaces_keys.append(faceID)
-                            loadfaces_values.append([list(mesh.getElementNodes(faceID)),sign*obj.Pressure])
+                            lf.append(list(mesh.getElementNodes(faceID)))
+                            pr.append(sign*obj.Pressure)
+                            # lf=np.append(lf,np.asarray(list(mesh.getElementNodes(faceID))))
+                            # pr=np.append(pr,sign*obj.Pressure)
                     else:
                         prn_upd("No Faces with Pressure Loads")
-    loadfaces=dict(zip(loadfaces_keys,loadfaces_values))
-
+    loadfaces=np.asarray(lf)
+    pressure = np.array(pr)
     # prn_upd("\nload faces: ", loadfaces)
 
     # re-order element nodes
@@ -313,7 +334,7 @@ def setUpInput(doc, mesh, analysis):
         el[9] = temp
 
 
-    return elnodes, nocoord, dispfaces, loadfaces, materialbyElement, interface_elements, noce
+    return elnodes, nocoord, dispfaces, loadfaces, materialbyElement, interface_elements, noce, pressure
 
 # shape functions for a 4-node tetrahedron - only used for stress interpolation
 def shape4tet(xi, et, ze, xl):
@@ -518,31 +539,17 @@ def shape6tri(xi, et, xl):
 @jit (nopython=True, cache=True)
 def hooke(element, materialbyElement):
     dmat = np.zeros((6, 6), dtype=np.float64)
-    e = materialbyElement[element-1][0] # Young's Modulus
-    nu = materialbyElement[element-1][1] # Poisson's Ratio
+    e = materialbyElement[element][0] # Young's Modulus
+    nu = materialbyElement[element][1] # Poisson's Ratio
     dm = e * (1.0 - nu) / (1.0 + nu) / (1.0 - 2.0 * nu)
     od = nu / (1.0 - nu)
     sd = 0.5* (1.0 - 2.0 * nu) / (1.0 - nu)
+
     dmat[0][0] = dmat[1][1] = dmat[2][2] = 1.0
     dmat[3][3] = dmat[4][4] = dmat[5][5] = sd
     dmat[0][1] = dmat[0][2] = dmat[1][2] = od
     dmat[1][0] = dmat[2][0] = dmat[2][1] = od
     dmat *= dm
-
-    # dmat[0][0] = 1.0
-    # dmat[1][1] = 1.0
-    # dmat[2][2] = 1.0
-    # dmat[3][3] = sd * dm
-    # dmat[4][4] = sd * dm
-    # dmat[5][5] = sd * dm
-    # dmat[0][1] = od * dm
-    # dmat[0][2] = od * dm
-    # dmat[1][2] = od * dm
-    # dmat[1][0] = od * dm
-    # dmat[2][0] = od * dm
-    # dmat[2][1] = od * dm
-
-    # dmat = np.identity(6)
 
     return dmat
 
@@ -562,15 +569,15 @@ def gaussPoints():
     # Gaussian integration points and weights for 6-noded triangle
     gp6 = np.array([[0.445948490915965,0.445948490915965,
                       0.111690794839005],
-                     [1.0-2.0*0.445948490915965,0.445948490915965,
+                     [0.10810301816807,0.445948490915965,
                       0.111690794839005],
-                     [0.445948490915965,1.0-2.0*0.445948490915965,
+                     [0.445948490915965,0.10810301816807,
                       0.111690794839005],
                      [0.091576213509771,0.091576213509771,
                       0.054975871827661],
-                     [1.0-2.0*0.091576213509771,0.091576213509771,
+                     [0.816847572980458,0.091576213509771,
                       0.054975871827661],
-                     [0.091576213509771,1.0-2.0*0.091576213509771,
+                     [0.091576213509771,0.816847572980458,
                       0.054975871827661]])
     return gp10, gp6
 
@@ -599,30 +606,67 @@ def nodalPoints():
 
 
 # caculate the global stiffness matrix and load vector
-def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, grav, kn, ks):
+@jit(nopython=True, cache=True)
+def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, grav, kn, ks, pressure):
+
+    # print(type(elnodes))
+    # print(type(nocoord))
+    # print(type(materialbyElement))
+    # print(type(loadfaces))
+    # print(type(interface_elements))
+    # print(type(grav))
+    # print(type(kn))
+    # print(type(ks))
 
     gp10, gp6 = gaussPoints()
-    np10, np6 = nodalPoints()
+    # np10, np6 = nodalPoints()
     nn = len(nocoord[:, 0])
-    # global stiffness matrix
-    gsm = np.zeros((3*nn, 3*nn), dtype=np.float64)
-    # global load vector
-    glv = np.zeros((3*nn), dtype=np.float64)
+
+    # numba
+    dmatloc=np.zeros((3,3), dtype=types.float64)
+    T=np.zeros((3,3), dtype=types.float64)
+    xlf=np.zeros((3,6), dtype=types.float64)
+    xlv=np.zeros((3,10), dtype=types.float64)
+    xli=np.zeros((3,12), dtype=types.float64)
+    nodes_int=np.zeros(12, dtype=types.int64)
+    gsm = np.zeros((3*nn, 3*nn), dtype=types.float64)
+    glv = np.zeros((3*nn), dtype=types.float64)
+
+    #no numba
+    # dmatloc=np.zeros((3,3), dtype=np.float64)
+    # T=np.zeros((3,3), dtype=np.float64)
+    # xlf=np.zeros((3,6), dtype=np.float64)
+    # xlv=np.zeros((3,10), dtype=np.float64)
+    # xli=np.zeros((3,12), dtype=np.float64)
+    # nodes_int=np.zeros(12, dtype=np.int64)
+    # gsm = np.zeros((3*nn, 3*nn), dtype=np.float64)
+    # glv = np.zeros((3*nn), dtype=np.float64)
+
 
     #   calculate element load vectors for pressure and add to global vector
-    for face in loadfaces:
-        pressure = loadfaces[face][1]
-        # prn_upd("pressure: {}".format(pressure))
-        xl = np.array([nocoord[nd-1] for nd in loadfaces[face][0]]).T
+    # print(len(pressure))
+    for face in range(len(pressure)-1):
+        # xl = np.array([nocoord[nd-1] for nd in loadfaces[face]]).T
+        if len(pressure) == 1:
+            break
+
+        nda = loadfaces[face+1]
+        # print(nda)
+        for i in range(3):
+            for j in range(6):
+                nd = nda[j]
+                xlf[i][j] = nocoord[nd - 1][i]
 
         # integrate element load vector
-        for ip in gp6:
-            xi = ip[0]
-            et = ip[1]
-            xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xl)
+        for index in range(len(gp6)):
+
+
+            xi = gp6[index][0]
+            et = gp6[index][1]
+            xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xlf)
 
             nl = 0
-            for nd in loadfaces[face][0]:
+            for nd in loadfaces[face]:
                 iglob = nd - 1
                 iglob3 = 3 * iglob
                 for k in range(3):
@@ -630,7 +674,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
                     # print("xp[k]: {}".format(xp[k]))
                     # print("abs(xj): {}".format(abs(xsj)))
                     # print("ip[2]: {}".format(ip[2]))
-                    load = shp[nl] * pressure * xp[k] * abs(xsj) * ip[2]
+                    load = shp[nl] * pressure[face+1] * xp[k] * abs(xsj) * gp6[index][2]
                     glv[iglob3+k] += load
                     # prn_upd("load: {}".format(load))
                     # prn_upd("shp: {}, xp: {}, xsj: {}, ip: {}".format(shp[nl], xp[k], abs(xsj), ip[2]))
@@ -638,26 +682,37 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
 
     # for each volume element calculate the element stiffness matrix
     # and gravity load vector and add to global matrix and vector
-    element = 0
-    for nodes in elnodes:
+
+    # for el, nodes in enumerate(elnodes):
+    for el in range(len(elnodes)):
+        nodes = elnodes[el]
         V=0.0
-        element += 1
         esm = np.zeros((30, 30), dtype=np.float64)
         gamma = np.zeros((30), dtype=np.float64)
         # stress-strain matrix dmat
         # print("element: {} E {} Nu {}".format(element, materialbyElement[element-1][0], materialbyElement[element-1][1]))
-        dmat = hooke(element, materialbyElement)
+        dmat = hooke(el, materialbyElement)
+        # dmat = np.zeros((6, 6), dtype=np.float64)
+
         # set up nodal values for this element
-        xl = np.array([nocoord[nd-1] for nd in nodes]).T
+        # xl = np.array([nocoord[nd-1] for nd in nodes]).T
         # integrate element matrix
         # cProfile.runctx('dshp10tet(args)', globals(), locals())
 
-        for ip in gp10:
+
+        for i in range(3):
+            for j in range(10):
+                nd = nodes[j]
+                xlv[i][j] = nocoord[nd - 1][i]
+
+        for index in range(len(gp10)):
+
+            ip = gp10[index]
             xi = ip[0]
             et = ip[1]
             ze = ip[2]
             shp = shp10tet(xi, et, ze)
-            xsj, dshp, bmat = dshp10tet(xi, et, ze, xl)
+            xsj, dshp, bmat = dshp10tet(xi, et, ze, xlv)
             esm += np.dot(bmat.T, np.dot(dmat,bmat)) * ip[3] * abs(xsj)
             gamma[2::3] += grav * shp * ip[3] * abs(xsj)
             V += xsj*ip[3]    # Element volume - not used
@@ -682,19 +737,39 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
     # For each interface element calculate the element matrix and
     # add to global stiffness matrix
 
+    # for nodes in interface_elements:
 
-    for nodes in interface_elements:
+    for el in range(len(interface_elements)):
+
         if interface_elements[0][0] == 0: break
-        xl = np.array([nocoord[nd-1] for nd in nodes[:6]]).T
+
+        for i in range(12):
+            nodes_int[i] = interface_elements[el][i]
+
+        # xl = np.array([nocoord[nd-1] for nd in nodes[:6]]).T
+        for i in range(12):
+            nd = nodes_int[i]
+            for j in range(3):
+                xli[j][i] = nocoord[nd - 1][j]
+
         esm = np.zeros((36, 36), dtype=np.float64)
-        dmatloc = np.diag([kn*kmax,ks*kmax,ks*kmax])
+        # dmatloc = np.diag([kn*kmax,ks*kmax,ks*kmax])
+        dmatloc[0] = kn*kmax
+        dmatloc[1] = dmatloc[2] = ks*kmax
         # integrate element matrix (np6: Newton Cotes, gp6: Gauss)
-        for ip in gp6:
+        # for ip in gp6:
+
+        # for index, ip in enumerate(gp6):
+        for index in range(len(gp6)):
+            ip = gp6[index]
             xi = ip[0]
             et = ip[1]
-            xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xl)
-            T=np.array([xp, xx, xt])
-            dmatglob=np.dot(T.T,np.dot(dmatloc,T))
+            xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xli)
+            # T=np.array([xp, xx, xt])
+            T[0]=xp
+            T[1]=xx
+            T[2]=xt
+            dmatglob=np.dot(T,np.dot(dmatloc,T.T))
             esm += np.dot(bmat.T,np.dot(dmatglob,bmat)) * abs(xsj) * ip[2]
         # add Element matrix to global stiffness matrix
         for i in range(12):
@@ -717,7 +792,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
         loadsumx+=glv[dof]
         loadsumy+=glv[dof+1]
         loadsumz+=glv[dof+2]
-    prn_upd("sumFx {} sumFy {} sumFz {}".format(loadsumx,loadsumy, loadsumz))
+    # print("sumFx {} sumFy {} sumFz {}".format(loadsumx, loadsumy, loadsumz))
 
     return gsm, glv, kmax
 
@@ -738,7 +813,7 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
         ninter = 0
 
     if np.min(np.diag(gsm)) <= 0.0:
-        prn_upd("non poitive definite matrix - check input")
+        prn_upd("non positive definite matrix - check input")
         for i in range(ndof):
             if gsm[i, i] == 0.0: prn_upd(
                 "DOF: {}; Coord: {} not attached".format(i, nocoord[i / 3]))
@@ -1105,7 +1180,7 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
         # print("element: {} qin[0] {}".format(el, qin[0]))
         # print("el {}, nodes: {} ".format(el, nodes))
         elpos=24*el
-        dmat = hooke(el+1, materialbyElement)
+        dmat = hooke(el, materialbyElement)
         elv = np.zeros((30), dtype=np.float64)
         # xl = np.array([nocoord[nd-1] for nd in nodes]).T
         for index, nd in enumerate(nodes):
@@ -1255,7 +1330,7 @@ def update_stress(elnodes, nocoord, materialbyElement, sig_yield, sig, du):
 
     for el, nodes in enumerate(elnodes):
         elpos=24*el
-        dmat = hooke(el+1, materialbyElement)
+        dmat = hooke(el, materialbyElement)
         for index, nd in enumerate(nodes):
             n3=3*(nd-1)
             i3=3*index
