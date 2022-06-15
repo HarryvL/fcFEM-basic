@@ -646,6 +646,8 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
     #   calculate element load vectors for pressure and add to global vector
     # print(len(pressure))
     for face in range(len(pressure)-1):
+        # print("number of faces: ", len(pressure)-1)
+        # print("face: ", face)
         # xl = np.array([nocoord[nd-1] for nd in loadfaces[face]]).T
         if len(pressure) == 1:
             break
@@ -666,7 +668,10 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
             xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xlf)
 
             nl = 0
-            for nd in loadfaces[face]:
+            # for nd in loadfaces[face]:
+            for i in range(len(loadfaces[face]-1)):
+                nd = loadfaces[face+1][i]
+                # print("nd: ", nd)
                 iglob = nd - 1
                 iglob3 = 3 * iglob
                 for k in range(3):
@@ -793,6 +798,9 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
         loadsumy+=glv[dof+1]
         loadsumz+=glv[dof+2]
     # print("sumFx {} sumFy {} sumFz {}".format(loadsumx, loadsumy, loadsumz))
+    print("sumFx: ", loadsumx)
+    print("sumFy: ", loadsumy)
+    print("sumFz: ", loadsumz)
 
     return gsm, glv, kmax
 
