@@ -29,7 +29,6 @@ import FreeCADGui as Gui
 import ObjectsFem
 import Part as Part
 import matplotlib.pyplot as plt
-import numba
 from numba import types, __version__
 import numpy as np
 import scipy.sparse as scsp
@@ -219,7 +218,7 @@ def setUpInput(doc, mesh, analysis):
                     elnodes[elo[elnum]][nonum] = twins[node][0] # connect element to new nodes
 
     else:
-        interface_elements = np.asarray([[0,0,0,0,0,0,0,0,0,0,0,0]])         # signature required for numba
+        interface_elements = np.asarray([[0,0,0,0,0,0,0,0,0,0,0,0]]) # signature required for numba
 
     noce=np.zeros((len(nocoord)), dtype=np.int16)
 
@@ -470,10 +469,17 @@ def dshp10tet(xi, et, ze, xl):
 # shape functions and their derivatives for a 6-node triangular interface element
 @jit(nopython=True, cache=True)
 def shape6tri(xi, et, xl):
+
+    #numba
+    # shp = np.zeros((6), dtype=types.float64)
+    # dshp = np.zeros((2, 6), dtype=types.float64)
+    # bmat = np.zeros((3, 36), dtype=types.float64)
+    # xs = np.zeros((3,3), dtype=types.float64)
+
+    #no numba
     shp = np.zeros((6), dtype=np.float64)
     dshp = np.zeros((2, 6), dtype=np.float64)
     bmat = np.zeros((3, 36), dtype=np.float64)
-
     xs = np.zeros((3,3), dtype=np.float64)
 
 
@@ -508,8 +514,10 @@ def shape6tri(xi, et, xl):
     #         for k in range(6):
     #             xs[i][j] += xl[i][k]*dshp[j][k]
 
+    # print(xs[0], xs[1])
     xp = np.cross(xs[0],xs[1]) # vector normal to surface
 
+    # print(xp)
     xsj = np.linalg.norm(xp) # Jacobian
 
     # xsj = np.sqrt(xp[0]*xp[0]+xp[1]*xp[1]+xp[2]*xp[2])
@@ -627,7 +635,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
     T=np.zeros((3,3), dtype=types.float64)
     xlf=np.zeros((3,6), dtype=types.float64)
     xlv=np.zeros((3,10), dtype=types.float64)
-    xli=np.zeros((3,12), dtype=types.float64)
+    xli=np.zeros((3,6), dtype=types.float64)
     nodes_int=np.zeros(12, dtype=types.int64)
     gsm = np.zeros((3*nn, 3*nn), dtype=types.float64)
     glv = np.zeros((3*nn), dtype=types.float64)
@@ -637,7 +645,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
     # T=np.zeros((3,3), dtype=np.float64)
     # xlf=np.zeros((3,6), dtype=np.float64)
     # xlv=np.zeros((3,10), dtype=np.float64)
-    # xli=np.zeros((3,12), dtype=np.float64)
+    # xli=np.zeros((3,6), dtype=np.float64)
     # nodes_int=np.zeros(12, dtype=np.int64)
     # gsm = np.zeros((3*nn, 3*nn), dtype=np.float64)
     # glv = np.zeros((3*nn), dtype=np.float64)
@@ -743,46 +751,53 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
     # add to global stiffness matrix
 
     # for nodes in interface_elements:
+    #     if interface_elements[0][0] == 0: break
+    #     xli = np.array([nocoord[nd - 1] for nd in nodes[:6]]).T
 
     for el in range(len(interface_elements)):
 
         if interface_elements[0][0] == 0: break
-
         for i in range(12):
             nodes_int[i] = interface_elements[el][i]
-
-        # xl = np.array([nocoord[nd-1] for nd in nodes[:6]]).T
-        for i in range(12):
+        for i in range(6):
             nd = nodes_int[i]
             for j in range(3):
                 xli[j][i] = nocoord[nd - 1][j]
 
         esm = np.zeros((36, 36), dtype=np.float64)
-        # dmatloc = np.diag([kn*kmax,ks*kmax,ks*kmax])
-        dmatloc[0] = kn*kmax
-        dmatloc[1] = dmatloc[2] = ks*kmax
-        # integrate element matrix (np6: Newton Cotes, gp6: Gauss)
-        # for ip in gp6:
+        dmatloc[0][0] = kn*kmax
+        dmatloc[1][1] = dmatloc[2][2] = ks*kmax
 
-        # for index, ip in enumerate(gp6):
+        # integrate element matrix (np6: Newton Cotes, gp6: Gauss)
+
+        # ORIGINAL PYTHON
+        # for ip in gp6:
+        #     xi = ip[0]
+        #     et = ip[1]
+        #     xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xli)
+        #     T = np.array([xp, xx, xt])
+        #     dmatglob = np.dot(T.T, np.dot(dmatloc, T))
+        #     esm += np.dot(bmat.T, np.dot(dmatglob, bmat)) * abs(xsj) * ip[2]
+
+        # NUMBA
         for index in range(len(gp6)):
             ip = gp6[index]
             xi = ip[0]
             et = ip[1]
             xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xli)
-            # T=np.array([xp, xx, xt])
             T[0]=xp
             T[1]=xx
             T[2]=xt
-            dmatglob=np.dot(T,np.dot(dmatloc,T.T))
+            dmatglob=np.dot(T.T,np.dot(dmatloc,T))
             esm += np.dot(bmat.T,np.dot(dmatglob,bmat)) * abs(xsj) * ip[2]
+
         # add Element matrix to global stiffness matrix
         for i in range(12):
-            iglob = nodes[i]-1
+            iglob = nodes_int[i]-1
             iglob3 = 3*iglob
             i3 = 3*i
             for j in range(12):
-                jglob = nodes[j]-1
+                jglob = nodes_int[j]-1
                 jglob3 = 3*jglob
                 j3 = j*3
                 for k in range (3):
@@ -797,6 +812,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
         loadsumx+=glv[dof]
         loadsumy+=glv[dof+1]
         loadsumz+=glv[dof+2]
+
     # print("sumFx {} sumFy {} sumFz {}".format(loadsumx, loadsumy, loadsumz))
     print("sumFx: ", loadsumx)
     print("sumFy: ", loadsumy)
@@ -1033,7 +1049,7 @@ def calcDisp (elnodes, nocoord, dispfaces, materialbyElement, interface_elements
             un.append(np.max(np.abs(disp[index])))
 
         # plot load-displacement curve - TODO: move to output / post-processing
-        cnt = plot(un, lbd)
+        # cnt = plot(un, lbd)
         # cnt=False
         prn_upd("cnt: ", cnt)
         # time.sleep(2)
