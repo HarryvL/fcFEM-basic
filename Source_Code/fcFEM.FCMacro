@@ -63,14 +63,14 @@ timer = [["extract information from FreeCAD objects....................... " + f
 
 # material input values - TODO: merge with FEM WB input dialogues
 gravity = -20.0e-6  # specific gravity acting in z-direction [N/mm3] = [1.0e-6 kN/m3]
-sig_yield = 0.02  # yield stress [MPa] for volume elements (von Mises material)
-shr_yield = 0.02  # yield stress [MPa] for interface elements (Coulomb material)
+sig_yield = 1000  # yield stress [MPa] for volume elements (von Mises material)
+shr_yield = 1.0  # yield stress [MPa] for interface elements (Coulomb material)
 kn = 1.0  # interface elastic normal stiffness factor (0.0 < kn <1.0)
 ks = 1.0  # interface elastic shear stiffness factor (0.0 < ks <1.0)
 
 # control input values - TODO: merge with FEM WB input dialogues
-out_disp = -1000  # +n: output total discplacment at step n ; -n: output incremental discplacement at step n (if n>last step then n=last step)
-nstep = 30  # number of load steps per run (default = 10). nstep == 1: eleastic analysis
+out_disp = -100000  # +n: output total discplacment at step n ; -n: output incremental discplacement at step n (if n>last step then n=last step)
+nstep = 10  # number of load steps per run (default = 10). nstep == 1: eleastic analysis
 iterat_max = 20  # max number of iterations per step - this triggers a scale-down and restart
 error_max = 1.0e-03  # convergence tolerance (default = 1.0e-03)
 relax = 1.2  # numerical over-relaxation (1.0 < relax < 1.5; default = 1.2)
