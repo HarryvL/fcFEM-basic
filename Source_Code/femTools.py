@@ -50,7 +50,6 @@ def prn_upd(*args):
     print('\n')
     Gui.updateGui()
 
-
 def setUpAnalysis():
     doc = App.ActiveDocument
     mesh = doc.getObject("FEMMeshGmsh").FemMesh
@@ -110,8 +109,9 @@ def setUpInput(doc, mesh, analysis):
     else:
         element_sets = [es["FEMElements"] for es in member.mats_linear]
 
+    NiP={}  # NiP[node] = Primitive Number
     materialbyElement = []
-    po_keys = []  # parentobject[el] = parent material object for element el
+    po_keys = []  # parentobject[el] = name of material object element el belongs to
     po_values = []
 
     prn_upd("Number of material objects", len(member.mats_linear))
@@ -127,7 +127,7 @@ def setUpInput(doc, mesh, analysis):
 
     materialbyElement = np.asarray(materialbyElement)
 
-    parentobject = dict(zip(po_keys, po_values))
+    parentobject = dict(zip(po_keys, po_values)) # parentobject[el] = name of material object element el belongs to
 
     # set up interface element connectivity
     nodecount = len(nocoord)
@@ -135,44 +135,49 @@ def setUpInput(doc, mesh, analysis):
     interface_elements = []
     for obj in App.ActiveDocument.Objects:
         if obj.Name == "BooleanFragments":
-            num_BF_els = len(App.ActiveDocument.BooleanFragments.Objects)
-            num_Mat_obs = len(member.mats_linear)
+            num_BF_els = len(App.ActiveDocument.BooleanFragments.Objects) # number of primitives in BooleanFragments
+            num_Mat_obs = len(member.mats_linear) # number of material objects
             if num_BF_els != num_Mat_obs:
                 prn_upd("Each BooleanFragment element needs its own material object")
                 raise SystemExit()
             shapecontacts = []
             tk = []
             tv = []
-            contactnum = 0  # number of contact faces between BooleanFragment elements
-            for index, obj1 in enumerate(obj.Objects):
-                for obj1face in obj1.Shape.Faces:
-                    el1faces = np.asarray(mesh.getFacesByFace(obj1face))
-                    for obj2 in obj.Objects[index + 1:]:
-                        for obj2face in obj2.Shape.Faces:
-                            el2faces = np.asarray(mesh.getFacesByFace(obj2face))
+            contactnum = 0  # number of contact faces between BooleanFragment primitives
+            for index, obj1 in enumerate(obj.Objects):                              # obj1: n-th primitive in BooleanFragment
+                for obj1face in obj1.Shape.Faces:                                   # obj1face: a face of n-th primitive
+                    el1faces = np.asarray(mesh.getFacesByFace(obj1face))            # el1faces[primitive face index] = [6-node face numbers]
+                    for SixNdFace in el1faces:                                      #SixNdFace: 6-node face element
+                        nodes = mesh.getElementNodes(SixNdFace)
+                        for nd in nodes:
+                            if nd not in NiP.keys():                                # NiP[node] = Primitive Number
+                                NiP[nd] = index
+                    for obj2 in obj.Objects[index + 1:]:                            # obj2: (n+1)-th primitive in BooleanFragment
+                        for obj2face in obj2.Shape.Faces:                           # obj2face: a face of (n+1)-th primitive
+                            el2faces = np.asarray(mesh.getFacesByFace(obj2face))    # el1faces[primitive face index] = [6-node face numbers]
                             contact = np.intersect1d(el1faces,
-                                                     el2faces)  # all volume element contact faces between obj1 and obj2
+                                                     el2faces)                      # all 6-node contact faces between obj1 and obj2
                             if contact != []:
                                 contactnum += 1
                                 npflist = []
-                                shapecontacts.append(contact)  # all volume element contact faces
-                                for contactface in contact:
+                                shapecontacts.append(contact)                       # all volume element 6-node contact faces
+                                for contactface in contact:                         # for all 6-node faces in contact
                                     npflist.append(mesh.getElementNodes(
-                                        contactface))  # all nodes at the contact between obj1 and obj2
+                                        contactface))                               # add nodes of 6-node contact faces between obj1 and obj2
                                 # flatten npflist and remove duplicate nodes
-                                cn = list(set([node for npf in npflist for node in
+                                cn = list(set([node for npf in npflist for node in  # remove duplicates and order
                                                npf]))
                                 cn.sort()
                                 for node in cn:
                                     if node not in tk:
-                                        nodecount += 1
-                                        tk.append(int(node))  # add an existing contact node to interface dict
+                                        nodecount += 1                              # nocount starts at the last old node number
+                                        tk.append(int(node))                        # add an existing contact node to interface dict
                                         tv.append([nodecount,
-                                                   contactnum])  # add a new contact node (nodecount) to interface dict and the contact (contactnum) it is a member of
+                                                   contactnum])                     # add a new contact node (nodecount) to interface dict and the contact (contactnum) it is a member of
                                         nocoord = np.append(nocoord, [nocoord[node - 1]],
-                                                            axis=0)  # add coordinates for new nodes
+                                                            axis=0)                 # add coordinates for new nodes
 
-            twins = dict(zip(tk, tv))  # twins : {oldnode : [newnode, face number]}
+            twins = dict(zip(tk, tv))  # twins : {oldnode : [newnode, primitive face number]}
 
             for facecontacts in shapecontacts:
                 for face in facecontacts:
@@ -258,20 +263,31 @@ def setUpInput(doc, mesh, analysis):
             bcnodes = list(dict.fromkeys(bcnodes))  # remove duplicates in bcnodes
             if bcnodes: dispfaces.append([bcnodes, bctype, bcvalue])
 
-    lf = [[0, 0, 0, 0, 0, 0]]
-    pr = [0.]
+    lf = [[0,0,0,0,0,0]]    # signature for numba
+    pr = [0]                # idem
+
     for obj in App.ActiveDocument.Objects:
         if obj.isDerivedFrom('Fem::ConstraintPressure'):
             if obj.Reversed:
                 sign = 1
             else:
                 sign = -1
-            for part, boundaries in obj.References:
-                for boundary in boundaries:
-                    ref = part.Shape.getElement(boundary)
+            for part, faces in obj.References:                      # obj.References: references to loaded primitive faces
+                for face in faces:
+                    ref = part.Shape.getElement(face)
                     if type(ref) == Part.Face:
-                        for faceID in mesh.getFacesByFace(ref):
-                            lf.append(list(mesh.getElementNodes(faceID)))
+                        for faceID in mesh.getFacesByFace(ref):     # face ID: ID of a 6-node face element
+                            nd_in_prim = []                         # nd_in_prim[node number] = prime number
+                            face_nodes = list(mesh.getElementNodes(faceID)) # 6-node element node numbers
+                            for nd in face_nodes:
+                                nd_in_prim.append(NiP[nd])
+                            mi = min(nd_in_prim)
+                            mx = max(nd_in_prim)
+                            if mi != mx:                            # not all parent primitives are the same
+                                to_swap = [index for index, x in enumerate(nd_in_prim) if x == mi]  # nodes to swap from lower prime to higher prime
+                                for index in to_swap:
+                                    face_nodes[index] = twins[face_nodes[index]][0]     # swap to twin node
+                            lf.append(face_nodes)
                             pr.append(sign * obj.Pressure)
                     else:
                         prn_upd("No Faces with Pressure Loads")
@@ -465,8 +481,6 @@ def shape6tri(xi, et, xl):
 
     xp = np.cross(xs[0], xs[1])  # vector normal to surface
 
-    # print(xs[0], xs[1], xp)
-
     xsj = np.linalg.norm(xp)  # Jacobian
 
     # xsj = np.sqrt(xp[0]*xp[0]+xp[1]*xp[1]+xp[2]*xp[2])
@@ -489,10 +503,6 @@ def shape6tri(xi, et, xl):
         bmat[0][ib] = -ni
         bmat[1][ib + 1] = -ni
         bmat[2][ib + 2] = -ni
-
-    # print("xs: ",xs, "\n")
-    # print("dshp: ",dshp, "\n")
-    # print("xl: ",xl, "\n")
 
     return xsj, shp, bmat, xx, xt, xp
 
@@ -528,7 +538,6 @@ def gaussPoints():
                       0.041666666666667],
                      [0.138196601125011, 0.138196601125011, 0.585410196624968,
                       0.041666666666667]])
-    # print(gp10)
     # Gaussian integration points and weights for 6-noded triangle
     gp6 = np.array([[0.445948490915965, 0.445948490915965,
                      0.111690794839005],
@@ -606,7 +615,6 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
         for i in range(3):
             for j in range(6):
                 nd = nda[j]
-                # print("nd: ", nd)
                 xlf[i][j] = nocoord[nd - 1][i]
 
         # integrate element load vector
@@ -622,7 +630,6 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
                 for k in range(3):
                     load = shp[nl] * pressure[face + 1] * xp[k] * abs(xsj) * gp6[index][2]
                     glv[iglob3 + k] += load
-                    # print(shp[nl], pressure[face + 1], xp[k], abs(xsj), gp6[index][2])
                 nl += 1
 
     # for each volume element calculate the element stiffness matrix
@@ -636,6 +643,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
         dmat = hooke(el, materialbyElement)
 
         # set up nodal values for this element
+        el14 = False
         for i in range(3):
             for j in range(10):
                 nd = nodes[j]
@@ -756,9 +764,6 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
 
     if np.min(np.diag(gsm)) <= 0.0:
         prn_upd("non positive definite matrix - check input")
-        for i in range(ndof):
-            if gsm[i, i] == 0.0: prn_upd(
-                "DOF: {}; Coord: {} not attached".format(i, nocoord[i / 3]))
         raise SystemExit()
 
     # glv will be impacted by non-zero prescribed displacements, so make a copy
@@ -794,7 +799,6 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
     trac = np.array([np.zeros((18 * max(ninter, 1)), dtype=np.float64)])  # contact stress in Tri6
     disp = np.array([np.zeros((ndof), dtype=np.float64)])  # displacement results
     lbd = np.zeros((1), dtype=np.float64)  # load level
-    # print(trac.shape)
 
     step = -1
     cnt = True
@@ -840,18 +844,8 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
             r = fex-fin
             rnorm = np.linalg.norm(r)
 
-
-            # for i, nd in enumerate(nocoord):
-            #     p1 = 3*i
-            #     for j in range(3):
-            #         p2 = p1+j
-            #         if abs(r[p2]) > 1.e-3:
-            #             print("node: ",i,"coord: ",j,": ", nd[j],"fex: ",fex[p2],"fin: ", fin[p2])
-
-
             # out-of-balance error
             error = rnorm / qnorm
-            # print(error, rnorm, qnorm)
 
             iterat = 0
             prn_upd("Iteration: {}, Error: {}".format(iterat, error))
@@ -890,7 +884,9 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
 
                 if iterat > iterat_max:
                     # scale down
-                    if restart == 4: raise SystemExit()
+                    if restart == 4:
+                        print("MAXIMUM RESTARTS REACHED")
+                        # raise SystemExit()
                     restart += 1
                     if step > 0:
                         dl = (lbd[step] - lbd[step - 1]) / scale_re / restart
@@ -1047,7 +1043,6 @@ def bcGSM(gsm, glv, dis):
 def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
                        interface_elements, trac, kmax, kn, ks, shr_yield, sig):
     gp10, gp6 = gaussPoints()
-    # print("gp10 upon entering update_stress_load {}".format(gp10))
     np10, np6 = nodalPoints()
 
     # NUMBA:
@@ -1077,9 +1072,6 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
     # sig_update = np.zeros(24 * len(elnodes), dtype=np.float64)
     # trac_update = np.zeros(18 * len(interface_elements), dtype=np.float64)
     # qin = np.zeros(3 * len(nocoord), dtype=np.float64)  # internal load vector
-
-
-    # print("INSIDE u_s_l")
 
     # VOLUME ELEMENTS
     for el in range(len(elnodes)):
@@ -1142,13 +1134,10 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
             for k in range(3):
                 qin[iglob3 + k] += elv[i3 + k]
 
-    # print("entering interface elements")
     # INTERFACE ELEMENTS
     for el in range(len(interface_elements)):
 
         if interface_elements[0][0] == 0: break
-
-        # print("nodes_int")
 
         for i in range(12):
             nodes_int[i] = interface_elements[el][i]
@@ -1160,7 +1149,6 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
         dmatloc[1][1] = ks * kmax
         dmatloc[2][2] = ks * kmax
 
-        # print("u12")
         # element nodal displacements
         for index, nd in enumerate(nodes_int):
             n3 = 3 * (nd - 1)
@@ -1168,61 +1156,45 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
             u12[i3] = du[n3]
             u12[i3 + 1] = du[n3 + 1]
             u12[i3 + 2] = du[n3 + 2]
-        # contact stresses and loads in the nodes (np6: Newton Cotes, gp6: Gauss)
         inelv = np.zeros((36), dtype=np.float64)
 
-
-        # print("xli")
         for i in range(6):
             nd = nodes_int[i]
-            # print("nd: ", nd)
             for j in range(3):
                 xli[j][i] = nocoord[nd - 1][j]
 
-
-        # print("update stress")
         for i in range(6):
             ip = gp6[i]
             nppos = elpos + 3 * i
             xi = ip[0]
             et = ip[1]
             xsj, shp, bmat, xx, xt, xp = shape6tri(xi, et, xli)
-            # print("OUTSIDE: ", xp, xx, xt, "\n")
 
             T[0] = xp
             T[1] = xx
             T[2] = xt
+
             dmatglob = np.dot(T.T, np.dot(dmatloc, T))
 
+            # elastic test stress in global coordinates
+            trac_test_global = trac[nppos:nppos + 3] + np.dot(dmatglob, np.dot(bmat, u12))
 
+            # elastic test stress in local coordinates
+            trac_test_local = np.dot(trac_test_global, T.T)
 
-            # # elastic test stress in local coordinates
-
-            trac_test = trac[nppos:nppos + 3] + np.dot(dmatglob, np.dot(bmat, u12))
-
-            # contact stresses in local coordinates
-            # TODO: bring stresses back to yield surface
-
-            npstress = trac_test
-
-            normal = trac_test[0]
-            shear1 = trac_test[1]
-            shear2 = trac_test[2]
-            # print("normal", normal)
-            # print("shear1", shear1)
-            # print("shear2", shear2)
+            normal = trac_test_local[0]
+            shear1 = trac_test_local[1]
+            shear2 = trac_test_local[2]
             fac = min(shr_yield/np.sqrt(shear1**2 + shear2**2), 1.0)
-            npstress = np.array([normal, fac*shear1, fac*shear2])
 
-            # add local contact stresses to global vectors
-            trac_update[nppos:nppos + 3] = npstress
-            # print(npstress)
+            npstress_local = np.array([normal, fac*shear1, fac*shear2])
+            npstress_global = np.dot(T.T, npstress_local)
+
+            trac_update[nppos:nppos + 3] = npstress_global
 
             # integrate element load vector
-            inelv += np.dot(bmat.T, npstress) * abs(xsj) * ip[2]
-            # print(bmat.T, npstress, abs(xsj), ip[2])
+            inelv += np.dot(bmat.T, npstress_global) * abs(xsj) * ip[2]
 
-        # print("update load")
         for i in range(12):
             iglob = nodes_int[i] - 1
             iglob3 = 3 * iglob
