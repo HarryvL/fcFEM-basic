@@ -39,7 +39,6 @@ from numba import types, __version__
 from sksparse.cholmod import cholesky
 from matplotlib.widgets import Button
 from feminout import importToolsFem as itf
-from femsolver.writerbase import FemInputWriter
 
 np.set_printoptions(precision=5, linewidth=300)
 
@@ -49,6 +48,7 @@ def prn_upd(*args):
         print(str(obj), end='')
     print('\n')
     Gui.updateGui()
+
 
 def setUpAnalysis():
     doc = App.ActiveDocument
@@ -76,6 +76,7 @@ def setUpInput(doc, mesh, analysis):
     docmesh = doc.getObject("FEMMeshGmsh")
     femmesh = docmesh.FemMesh
     member = membertools.AnalysisMember(analysis)
+
     # determine elements connected to a node using FC API
     fet = mt.get_femelement_table(mesh)
     # fet is dictionary: { elementid : [ nodeid, nodeid, ... , nodeid ] }
@@ -83,9 +84,8 @@ def setUpInput(doc, mesh, analysis):
     # net is dictionary: {nodeID : [[eleID, binary node position], [], ...], nodeID : [[], [], ...], ...}
     # node0 has binary node position 2^0 = 1, node1 = 2^1 = 2, ..., node10 = 2^10 = 1024
 
-    # create connectivity array elnodes for mapping local node number -> global node number
-    elnodes = np.array([mesh.getElementNodes(el) for el in mesh.Volumes])  # elnodes[elementIndex] = [node1,...,Node10]
-
+    # create connectivity array elNodes for mapping local node number -> global node number
+    elNodes = np.array([mesh.getElementNodes(el) for el in mesh.Volumes])  # elNodes[elementIndex] = [node1,...,Node10]
     elo = dict(zip(mesh.Volumes, range(len(mesh.Volumes))))  # elo : {elementNumber : elementIndex}
 
     # create nodal coordinate array nocoord for node number -> (x,y,z)
@@ -93,129 +93,150 @@ def setUpInput(doc, mesh, analysis):
     nocoord = np.asarray([[v.x, v.y, v.z] for v in ncv])  # nocoord[nodeIndex] = [x-coord, y-coord, z-coord]
 
     # get access to element sets: meshdatagetter.mat_geo_sets
-
-    t1 = time.time()
     meshdatagetter = meshsetsgetter.MeshSetsGetter(
         analysis,
         solver,
         docmesh,
         member)
     meshdatagetter.get_mesh_sets()
-    t2 = time.time()
-    print("querying meshsetsgetter: ", t2 - t1, "seconds\n")
 
     if len(member.mats_linear) == 1:
         element_sets = [mesh.Volumes]
     else:
         element_sets = [es["FEMElements"] for es in member.mats_linear]
 
-    NiP={}  # NiP[node] = Primitive Number
-    materialbyElement = []
-    po_keys = []  # parentobject[el] = name of material object element el belongs to
-    po_values = []
+    matCon = {}  # BooleanFragment Primitive the material object refers to
+    ppEl = {}  # BooleanFragment Primitive element El belonga to
+    materialbyElement = []  # see further
 
-    prn_upd("Number of material objects", len(member.mats_linear))
+    prn_upd("Number of material objects: ", len(member.mats_linear))
 
-    for index, object in enumerate(member.mats_linear):
-        E = float(App.Units.Quantity(object['Object'].Material['YoungsModulus']).getValueAs('MPa'))
-        Nu = float(object['Object'].Material['PoissonRatio'])
-        prn_upd("Material Object: ", object['Object'].Name, "   E= ", E, "   Nu= ", Nu)
-        for el in element_sets[index]:
-            po_keys.append(el)
-            po_values.append(object['Object'].Name)
+    for obj in App.ActiveDocument.Objects:
+        if obj.Name == "BooleanFragments":
+            num_BF_els = len(App.ActiveDocument.BooleanFragments.Objects)  # number of primitives in BooleanFragments
+            num_Mat_obs = len(member.mats_linear)  # number of material objects
+            if num_BF_els != num_Mat_obs:
+                prn_upd("Each BooleanFragment primitive needs its own material object")
+                raise SystemExit()
+            for indp, primobject in enumerate(obj.Objects):  # primobject: primitive in BooleanFragment
+                for indm, matobject in enumerate(member.mats_linear):  # matobject: material object
+                    if matobject['Object'].References[0][0] == primobject:
+                        matCon[indm] = indp  # the BooleanFragment primitive the material object refers to
+
+    for indm, matobject in enumerate(member.mats_linear):
+        E = float(App.Units.Quantity(matobject['Object'].Material['YoungsModulus']).getValueAs('MPa'))
+        Nu = float(matobject['Object'].Material['PoissonRatio'])
+        prn_upd("Material Object: ", matobject['Object'].Name, "   E= ", E, "   Nu= ", Nu)
+        for el in element_sets[indm]:  # element_sets[indm]: all elements with material indm
+            if matCon: ppEl[el] = matCon[indm]  # ppEl[el]: primitive el belongs to
             materialbyElement.append([E, Nu])  # materialbyElement[elementIndex] = [E, Nu]
-
     materialbyElement = np.asarray(materialbyElement)
-
-    parentobject = dict(zip(po_keys, po_values)) # parentobject[el] = name of material object element el belongs to
 
     # set up interface element connectivity
     nodecount = len(nocoord)
-    twins = {}  # twins : {oldnode : [newnode, face number]}
     interface_elements = []
+    tk = []
+    tv = []
+    ti = []
+    NiP = {}
+    shiftelements = []
+
     for obj in App.ActiveDocument.Objects:
         if obj.Name == "BooleanFragments":
-            num_BF_els = len(App.ActiveDocument.BooleanFragments.Objects) # number of primitives in BooleanFragments
-            num_Mat_obs = len(member.mats_linear) # number of material objects
-            if num_BF_els != num_Mat_obs:
-                prn_upd("Each BooleanFragment element needs its own material object")
-                raise SystemExit()
-            shapecontacts = []
-            tk = []
-            tv = []
-            contactnum = 0  # number of contact faces between BooleanFragment primitives
-            for index, obj1 in enumerate(obj.Objects):                              # obj1: n-th primitive in BooleanFragment
-                for obj1face in obj1.Shape.Faces:                                   # obj1face: a face of n-th primitive
-                    el1faces = np.asarray(mesh.getFacesByFace(obj1face))            # el1faces[primitive face index] = [6-node face numbers]
-                    for SixNdFace in el1faces:                                      #SixNdFace: 6-node face element
-                        nodes = mesh.getElementNodes(SixNdFace)
+            for indp1, primitive1 in enumerate(obj.Objects):  # primitive1: n-th primitive in BooleanFragment
+                for face1 in primitive1.Shape.Faces:  # face: a face of n-th primitive
+                    elfaces1 = np.asarray(
+                        mesh.getFacesByFace(face1))  # el1faces[primitive face index] = [6-node-face numbers]
+                    for sixNdFace in elfaces1:  # sixNdFace: 6-node face element
+                        nodes = mesh.getElementNodes(sixNdFace)
                         for nd in nodes:
-                            if nd not in NiP.keys():                                # NiP[node] = Primitive Number
-                                NiP[nd] = index
-                    for obj2 in obj.Objects[index + 1:]:                            # obj2: (n+1)-th primitive in BooleanFragment
-                        for obj2face in obj2.Shape.Faces:                           # obj2face: a face of (n+1)-th primitive
-                            el2faces = np.asarray(mesh.getFacesByFace(obj2face))    # el1faces[primitive face index] = [6-node face numbers]
-                            contact = np.intersect1d(el1faces,
-                                                     el2faces)                      # all 6-node contact faces between obj1 and obj2
-                            if contact != []:
-                                contactnum += 1
-                                npflist = []
-                                shapecontacts.append(contact)                       # all volume element 6-node contact faces
-                                for contactface in contact:                         # for all 6-node faces in contact
-                                    npflist.append(mesh.getElementNodes(
-                                        contactface))                               # add nodes of 6-node contact faces between obj1 and obj2
-                                # flatten npflist and remove duplicate nodes
-                                cn = list(set([node for npf in npflist for node in  # remove duplicates and order
-                                               npf]))
-                                cn.sort()
-                                for node in cn:
-                                    if node not in tk:
-                                        nodecount += 1                              # nocount starts at the last old node number
-                                        tk.append(int(node))                        # add an existing contact node to interface dict
-                                        tv.append([nodecount,
-                                                   contactnum])                     # add a new contact node (nodecount) to interface dict and the contact (contactnum) it is a member of
+                            if nd not in NiP.keys():  # NiP[node] = Primitive Number
+                                NiP[nd] = indp1
+                    for indp2, primitive2 in enumerate(obj.Objects[indp1 + 1:]):
+                        for face2 in primitive2.Shape.Faces:  # face: a face of n+1-th primitive
+                            elfaces2 = np.asarray(
+                                mesh.getFacesByFace(face2))  # el1faces[primitive face index] = [6-node-face numbers]
+                            contact = list(set(elfaces1) & set(elfaces2))  # triangles in contact
+                            if contact:
+                                npflist = []  # contact nodes on primitive face
+                                for sixNdFace in elfaces1:  # sixNdFace: 6-node-face element in face
+                                    nodes = mesh.getElementNodes(sixNdFace)
+                                    npflist.append(nodes)  # add nodes of sixNdFace to primitive contact face
+                                cn = list(set([node for npf in npflist for node in
+                                               npf]))  # remove duplicates
+                                cn.sort()  # sort nodes
+                                cn1_new = list(range(nodecount + 1, nodecount + len(cn) + 1))  # new nodes on face n
+                                cn2_new = list(range(nodecount + len(cn) + 1,
+                                                     nodecount + 2 * len(cn) + 1))  # new nodes on face n+1
+                                nodecount += 2 * len(cn)
+                                tk += cn + cn  # reference node numbers
+                                tv += cn1_new + cn2_new  # new node numbers
+                                ti += len(cn) * [indp1] + len(cn) * [
+                                    indp1 + indp2 + 1]  # parent primitive number of new node
+                                for i in range(2):  # for 2 sets of new nodes
+                                    for node in cn:
                                         nocoord = np.append(nocoord, [nocoord[node - 1]],
-                                                            axis=0)                 # add coordinates for new nodes
+                                                            axis=0)  # add coordinates for new nodes
+                                for sixNdFace in contact:
+                                    rn = mesh.getElementNodes(sixNdFace)  # reference nodes
+                                    nodeset1 = []
+                                    nodeset2 = []
+                                    for nd in rn:
+                                        nodeset1.append(cn1_new[cn.index(nd)])
+                                        nodeset2.append(cn2_new[cn.index(nd)])
+                                    interface_elements.append(
+                                        nodeset1 + nodeset2)  # interface_elements[index] = [nodeA1,..,nodeA6, nodeB1,..,nodeB6]
+                                for node in cn:
+                                    for el in net[
+                                        node]:  # net: {nodeID : [[eleID, binary node position], [], ...], nodeID : ...}
+                                        nodepos = el[1]  # binary node position
+                                        nonum = int(math.log(nodepos,
+                                                             2))  # local node number from binary node number net[node][1]
+                                        if ppEl[el[0]] == indp1:  # if element embedded in primitive n
+                                            new_node = cn1_new[cn.index(node)]
+                                            elNodes[elo[el[0]]][
+                                                nonum] = new_node  # connect element to new node in primitive n
+                                            NiP[new_node] = indp1
+                                        elif ppEl[el[0]] == indp1 + indp2 + 1:  # if element embedded in primitive n+1
+                                            new_node = cn2_new[cn.index(node)]
+                                            elNodes[elo[el[0]]][
+                                                nonum] = new_node  # connect element to new node in primitive n+1
+                                            NiP[new_node] = indp1 + indp2 + 1
+                                        shiftelements.append(elo[el[0]])
 
-            twins = dict(zip(tk, tv))  # twins : {oldnode : [newnode, primitive face number]}
+    twins = {}  # twins: {ref node 1: {primitive 1: [new_node 1, new_node 2], etc.}, etc.}
+    for ind, node in enumerate(tk):  # for reference nodes
+        if node not in twins:
+            twins[node] = {}
+        if ti[ind] not in twins[node]:
+            twins[node][ti[ind]] = []
+        twins[node][ti[ind]].append(tv[ind])
 
-            for facecontacts in shapecontacts:
-                for face in facecontacts:
-                    nodeset1 = list(mesh.getElementNodes(face))
-                    nodeset2 = []
-                    for node in mesh.getElementNodes(face):
-                        nodeset2.append(twins[node][0])
-                    interface_elements.append(
-                        nodeset1 + nodeset2)  # interface_elements[index] = [oldnode1,..,oldnode6, newnode1,..,newnode6]
+    if interface_elements == []:
+        interface_elements = np.asarray([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])  # explicit signature required for numba
 
-            interface_elements = np.asarray(
-                interface_elements)  # add interface elements for the face between obj1 and obj2
+    interface_elements = np.asarray(interface_elements)
 
     prn_upd("number of interface elements: {}".format(len(interface_elements)))
 
-    # reconnect volume elements to new interface nodes
-    if interface_elements != []:
-        membership = [""] * contactnum
-        shiftelements = []  # reconnected elements
-        for node in twins:
-            if membership[twins[node][1] - 1] == "":
-                membership[twins[node][1] - 1] = parentobject[
-                    net[node][0][0]]  # elements that will stay with old nodes are in membership material object
-            for element in net[node]:
-                elnum = element[0]  # element number
-                if parentobject[elnum] != membership[twins[node][1] - 1]:  # reconnect element to new nodes
-                    nonum = int(math.log(element[1],
-                                         2))  # local node number from binary node number net[node][1]
-                    shiftelements.append(elo[elnum])
-                    elnodes[elo[elnum]][nonum] = twins[node][0]  # connect element to new nodes
+    ks_red = np.ones(6 * len(interface_elements))  # reduction of interface shear stiffness for plasticity iteration
 
-    else:
-        interface_elements = np.asarray([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])  # explicit signature required for numba
+    # link interface corner nodes in the same primitive. link0[ind] is connected to link1[ind].
+    # This can be done better with a dictionary, but Numba does not support dictionaries.
+    link0 = [0]
+    link1 = [0]
+    for nd in twins:
+        for prim in twins[nd]:
+            if len(twins[nd][prim]) == 2:
+                link0.append(twins[nd][prim][0])
+                link1.append(twins[nd][prim][1])
+
+    link0 = np.asarray(link0)
+    link1 = np.asarray(link1)
 
     noce = np.zeros((len(nocoord)), dtype=np.int16)
-
     for inno in range(len(nocoord)):
-        i, j = np.where(elnodes == inno + 1)
+        i, j = np.where(elNodes == inno + 1)
         noce[inno] = len(i)
 
     # create boundary condition array dispfaces
@@ -242,51 +263,46 @@ def setUpInput(doc, mesh, analysis):
                         bc = mesh.getNodesByEdge(ref)
                         for bcn in bc: bcnodes.append(bcn)
                     elif type(ref) == Part.Face:
-                        bc = mesh.getNodesByFace(ref)
+                        bc = mesh.getNodesByFace(
+                            ref)  # all nodes on a primitive face with a displacement boundary condition
                         for bcn in bc:
-                            if bcn not in twins:
-                                bcnodes.append(bcn)
+                            bcnodes.append(bcn)
                     else:
                         prn_upd("No Boundaries Found")
-                    edge = list(set(bc) & set(twins))
-                    interior = list(set(bc) - set(twins))
-
-                    for node in edge:
-                        for elem in net[node]:
-                            elnum = elo[elem[0]]
-                            if list(set(elnodes[elnum]) & set(interior)) != []:
-                                if elnum in shiftelements:
-                                    bcnodes.append(twins[node][0])
-                                else:
-                                    bcnodes.append(node)
-
             bcnodes = list(dict.fromkeys(bcnodes))  # remove duplicates in bcnodes
+            bc_ref_nodes = list(set(list(twins.keys())) & set(bcnodes))  # interface reference nodes p/o BC face
+            bc_internal_nodes = list(set(bcnodes) - set(list(twins.keys())))  # BC nodes not p/o an interface
+            for nd in bc_ref_nodes:
+                for prim in twins[nd]:
+                    if prim == NiP[bc_internal_nodes[0]]:
+                        bcnodes += twins[nd][
+                            prim]  # add new interface nodes to the BC face, if they are embedded in the same primitive as the "internal nodes"
             if bcnodes: dispfaces.append([bcnodes, bctype, bcvalue])
 
-    lf = [[0,0,0,0,0,0]]    # signature for numba
-    pr = [0]                # idem
+    dispfaces.append([list(twins.keys()), [False, False, False], [0, 0, 0]])  # immobilize interface reference nodes
 
+    lf = [[0, 0, 0, 0, 0, 0]]  # load face nodes - signature for numba
+    pr = [0]  # load face pressure - signature for numba
     for obj in App.ActiveDocument.Objects:
         if obj.isDerivedFrom('Fem::ConstraintPressure'):
             if obj.Reversed:
                 sign = 1
             else:
                 sign = -1
-            for part, faces in obj.References:                      # obj.References: references to loaded primitive faces
+            for part, faces in obj.References:  # obj.References: references to loaded primitive faces
                 for face in faces:
                     ref = part.Shape.getElement(face)
                     if type(ref) == Part.Face:
-                        for faceID in mesh.getFacesByFace(ref):     # face ID: ID of a 6-node face element
-                            nd_in_prim = []                         # nd_in_prim[node number] = prime number
-                            face_nodes = list(mesh.getElementNodes(faceID)) # 6-node element node numbers
-                            for nd in face_nodes:
-                                nd_in_prim.append(NiP[nd])
-                            mi = min(nd_in_prim)
-                            mx = max(nd_in_prim)
-                            if mi != mx:                            # not all parent primitives are the same
-                                to_swap = [index for index, x in enumerate(nd_in_prim) if x == mi]  # nodes to swap from lower prime to higher prime
-                                for index in to_swap:
-                                    face_nodes[index] = twins[face_nodes[index]][0]     # swap to twin node
+                        for faceID in mesh.getFacesByFace(ref):  # face ID: ID of a 6-node face element
+                            face_nodes = list(mesh.getElementNodes(faceID))  # 6-node element node numbers
+                            if twins:
+                                regular_nodes = list(
+                                    set(face_nodes) - set(list(twins.keys())))  # nodes outside interface
+                                prim = NiP[regular_nodes[0]]  # select primitive of first regular node
+                                for index, nd in enumerate(face_nodes):
+                                    if nd in twins:
+                                        face_nodes[index] = twins[nd][
+                                            prim][0]  # swap node number from reference node to new node
                             lf.append(face_nodes)
                             pr.append(sign * obj.Pressure)
                     else:
@@ -295,7 +311,7 @@ def setUpInput(doc, mesh, analysis):
     pressure = np.array(pr)
 
     # re-order element nodes
-    for el in elnodes:
+    for el in elNodes:
         temp = el[1]
         el[1] = el[2]
         el[2] = temp
@@ -306,7 +322,7 @@ def setUpInput(doc, mesh, analysis):
         el[8] = el[9]
         el[9] = temp
 
-    return elnodes, nocoord, dispfaces, loadfaces, materialbyElement, interface_elements, noce, pressure
+    return elNodes, nocoord, dispfaces, loadfaces, materialbyElement, interface_elements, noce, pressure, link0, link1, ks_red
 
 
 # shape functions for a 4-node tetrahedron - only used for stress interpolation
@@ -443,12 +459,6 @@ def dshp10tet(xi, et, ze, xl):
 # shape functions and their derivatives for a 6-node triangular interface element
 @jit(nopython=True, cache=True)
 def shape6tri(xi, et, xl):
-    # numba
-    # shp = np.zeros((6), dtype=types.float64)
-    # dshp = np.zeros((2, 6), dtype=types.float64)
-    # bmat = np.zeros((3, 36), dtype=types.float64)
-
-    # no numba
     shp = np.zeros((6), dtype=np.float64)
     dshp = np.zeros((2, 6), dtype=np.float64)
     bmat = np.zeros((3, 36), dtype=np.float64)
@@ -580,42 +590,43 @@ def nodalPoints():
 
 # caculate the global stiffness matrix and load vector
 @jit(nopython=True, cache=True)
-def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, grav, kn, ks, pressure):
+def calcGSM(elNodes, nocoord, materialbyElement, loadfaces, interface_elements,
+            grav, kn, ks, pressure, link0, link1, ks_red):
     gp10, gp6 = gaussPoints()
     # np10, np6 = nodalPoints()  # required here only for Newton Coates integration
-    nn = len(nocoord[:, 0])
+    nn = len(nocoord[:, 0])  # number of degrees of freedom
 
     # numba
-    dmatloc = np.zeros((3, 3), dtype=types.float64)
-    T = np.zeros((3, 3), dtype=types.float64)
-    xlf = np.zeros((3, 6), dtype=types.float64)
-    xlv = np.zeros((3, 10), dtype=types.float64)
-    xli = np.zeros((3, 6), dtype=types.float64)
-    nodes_int = np.zeros(12, dtype=types.int64)
-    gsm = np.zeros((3 * nn, 3 * nn), dtype=types.float64)
-    glv = np.zeros((3 * nn), dtype=types.float64)
+    dmatloc = np.zeros((3, 3), dtype=types.float64)  # local material stiffness matrix
+    T = np.zeros((3, 3), dtype=types.float64)  # transformation matrix local-global coordinates
+    xlf = np.zeros((3, 6), dtype=types.float64)  # coordinates of load face nodes
+    xlv = np.zeros((3, 10), dtype=types.float64)  # coordinates of volume element nodes
+    xli = np.zeros((3, 6), dtype=types.float64)  # coordinates of interface element nodes
+    nodes_int = np.zeros(12, dtype=types.int64)  # interface node numbers
+    gsm = np.zeros((3 * nn, 3 * nn), dtype=types.float64)  # global stiffness matrix
+    glv = np.zeros((3 * nn), dtype=types.float64)  # global load vector
 
     # no numba
-    # dmatloc=np.zeros((3,3), dtype=np.float64)
-    # T=np.zeros((3,3), dtype=np.float64)
-    # xlf=np.zeros((3,6), dtype=np.float64)
-    # xlv=np.zeros((3,10), dtype=np.float64)
-    # xli=np.zeros((3,6), dtype=np.float64)
-    # nodes_int=np.zeros(12, dtype=np.int64)
-    # gsm = np.zeros((3*nn, 3*nn), dtype=np.float64)
-    # glv = np.zeros((3*nn), dtype=np.float64)
+    # dmatloc = np.zeros((3, 3), dtype=np.float64)
+    # T = np.zeros((3, 3), dtype=np.float64)
+    # xlf = np.zeros((3, 6), dtype=np.float64)
+    # xlv = np.zeros((3, 10), dtype=np.float64)
+    # xli = np.zeros((3, 6), dtype=np.float64)
+    # nodes_int = np.zeros(12, dtype=np.int64)
+    # gsm = np.zeros((3 * nn, 3 * nn), dtype=np.float64)
+    # glv = np.zeros((3 * nn), dtype=np.float64)
 
     #   calculate element load vectors for pressure and add to global vector
 
-    for face in range(len(pressure) - 1):
+    for face in range(len(pressure) - 1):  # first pressure value is a dummy signature for numba
         if len(pressure) == 1:
             break
 
-        nda = loadfaces[face + 1]
+        nda = loadfaces[face + 1]  # node numbers of loaded face
         for i in range(3):
             for j in range(6):
                 nd = nda[j]
-                xlf[i][j] = nocoord[nd - 1][i]
+                xlf[i][j] = nocoord[nd - 1][i]  # coordinates of loaded face nodes
 
         # integrate element load vector
         for index in range(len(gp6)):
@@ -635,15 +646,14 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
     # for each volume element calculate the element stiffness matrix
     # and gravity load vector and add to global matrix and vector
 
-    for el in range(len(elnodes)):
-        nodes = elnodes[el]
+    for el in range(len(elNodes)):
+        nodes = elNodes[el]
         V = 0.0
         esm = np.zeros((30, 30), dtype=np.float64)
         gamma = np.zeros((30), dtype=np.float64)
         dmat = hooke(el, materialbyElement)
 
         # set up nodal values for this element
-        el14 = False
         for i in range(3):
             for j in range(10):
                 nd = nodes[j]
@@ -684,7 +694,7 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
 
     for el in range(len(interface_elements)):
 
-        if interface_elements[0][0] == 0: break
+        if interface_elements[0][0] == 0: break  # first interface element is a dummy signature for numba
         for i in range(12):
             nodes_int[i] = interface_elements[el][i]
         for i in range(6):
@@ -694,7 +704,6 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
 
         esm = np.zeros((36, 36), dtype=np.float64)
         dmatloc[0][0] = kn * kmax
-        dmatloc[1][1] = dmatloc[2][2] = ks * kmax
 
         # integrate element matrix (np6: Newton Cotes, gp6: Gauss)
 
@@ -709,6 +718,8 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
 
         # NUMBA
         for index in range(len(gp6)):
+            dmatloc[1][1] = dmatloc[2][2] = ks_red[6 * el + index] * ks * kmax
+
             ip = gp6[index]
             xi = ip[0]
             et = ip[1]
@@ -716,7 +727,8 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
             T[0] = xp
             T[1] = xx
             T[2] = xt
-            dmatglob = np.dot(T.T, np.dot(dmatloc, T))
+            dmatglob = np.dot(T.T, np.dot(dmatloc,
+                                          T))  # transformation of local material stiffness matrix to global coordinates
             esm += np.dot(bmat.T, np.dot(dmatglob, bmat)) * abs(xsj) * ip[2]
 
         # add Element matrix to global stiffness matrix
@@ -732,6 +744,18 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
                     for l in range(3):
                         gsm[iglob3 + k, jglob3 + l] += esm[i3 + k, j3 + l]
 
+    # add stiff links for corner interface nodes in the same primitive
+    for index, node in enumerate(link0):
+        if node != 0:
+            n3a = 3 * (int(node) - 1)
+            n3b = 3 * (int(link1[index]) - 1)
+            for i in range(3):
+                stiff = 100 * kmax
+                gsm[n3a + i, n3a + i] += stiff
+                gsm[n3b + i, n3b + i] += stiff
+                gsm[n3a + i, n3b + i] += -stiff
+                gsm[n3b + i, n3a + i] += -stiff
+
     loadsumx = 0.0
     loadsumy = 0.0
     loadsumz = 0.0
@@ -741,33 +765,27 @@ def calcGSM(elnodes, nocoord, materialbyElement, loadfaces, interface_elements, 
         loadsumy += glv[dof + 1]
         loadsumz += glv[dof + 2]
 
-    print("sumFx: ", loadsumx)
-    print("sumFy: ", loadsumy)
-    print("sumFz: ", loadsumz)
-
     return gsm, glv, kmax
 
 
 # calculate load-deflection curve
-def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements, kmax, gsm, glv, nstep, iterat_max,
+def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements, kmax, gsm, glv, nstep, iterat_max,
              error_max, relax, scale_re,
              scale_up, scale_dn,
              sig_yield, shr_yield, kn,
-             ks, out_disp):
+             ks, out_disp, link0, link1,
+             elMat, loadFaces, gravity, pressure, ks_red):
     ndof = len(glv)
-    nelem = len(elnodes)
+    nelem = len(elNodes)
 
     if interface_elements[0][0] != 0:
         ninter = len(interface_elements)
     else:
         ninter = 0
 
-    if np.min(np.diag(gsm)) <= 0.0:
-        prn_upd("non positive definite matrix - check input")
-        raise SystemExit()
-
-    # glv will be impacted by non-zero prescribed displacements, so make a copy
-    # to preserve the external load vector for use in the iterative scheme
+    # glv and gsm will be impacted by non-zero prescribed displacements, so make a copy
+    # to preserve both for use in the iterative scheme
+    # TODO: improve error estimate for pure displacement control
     qex = np.copy(glv)
     qnorm = np.linalg.norm(qex)
     if qnorm < 1.0: qnorm = 1.0
@@ -775,17 +793,21 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
     # modify the global stiffness matrix and load vector for displacement BC
     gsm, glv, fixdof = bcGSM(gsm, glv, dispfaces)
 
+    if np.min(np.diag(gsm)) <= 0.0:
+        prn_upd("non positive definite matrix - check input")
+        raise SystemExit()
+
     # Cholesky decomposition of the global stiffness matrix and elastic solution
-    # TODO: Apply reverse Cuthill McKee and banded Cholesky to speed things up
-    # TODO: Experiment with Intel Distribution for Python (Math Kernal Library) to optimize speed
+    # TODO: apply reverse Cuthill McKee and banded Cholesky to speed things up
+    # TODO: experiment with Intel Distribution for Python (Math Kernal Library) to optimize speed
 
     # using cholmod
-    A = scsp.csc_matrix(gsm)
+    A = scsp.csc_matrix(gsm, dtype=np.float64)
     b = glv
     t0 = time.time()
     factor = cholesky(A)
     t1 = time.time()
-    ue = factor(b)
+    ue = factor(b)  # elastic solution
     t2 = time.time()
     prn_upd("Sparse Cholesky Decomposition: {} log10(s), Solution: {} log10(s)".format(np.log10(t1 - t0),
                                                                                        np.log10(t2 - t1)))
@@ -806,8 +828,7 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
     un = []
 
     if (nstep == 1.0):
-    # if (interface_elements[0][0] != 0 or nstep == 1.0):
-        # perform an elastic (one-step) analysis only
+        # perform an elastic (one-step) analysis
         step = 0
         out_disp = 1
         un = [0.]
@@ -829,19 +850,19 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
 
             # update stresses and loads
 
-            sig_update, trac_update, qin = update_stress_load(elnodes, nocoord, materialbyElement,
-                                                              sig_yield, du, np.array(interface_elements),
-                                                              trac[step], kmax, kn, ks, shr_yield, sig[step])
-
+            sig_update, trac_update, qin, ks_red = update_stress_load(elNodes, nocoord, materialbyElement,
+                                                                      sig_yield, du, np.array(interface_elements),
+                                                                      trac[step], kmax, kn, ks, shr_yield, sig[step],
+                                                                      link0, link1, ks_red)
 
             sig = np.append(sig, np.array([sig_update]), axis=0)
 
             trac = np.append(trac, np.array([trac_update]), axis=0)
 
             # calculate residual load vector
-            fex=fixdof * lbd[step + 1] * qex
-            fin=fixdof * qin
-            r = fex-fin
+            fex = fixdof * lbd[step + 1] * qex
+            fin = fixdof * qin
+            r = fex - fin
             rnorm = np.linalg.norm(r)
 
             # out-of-balance error
@@ -850,13 +871,26 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
             iterat = 0
             prn_upd("Iteration: {}, Error: {}".format(iterat, error))
 
-            # raise SystemExit()
-
             while error > error_max:
 
                 iterat += 1
 
-                # displacement correction
+                # calculate tangent stiffness matrix for Interface Elements
+                if iterat == 1 and interface_elements[0][0] != 0:
+                    prn_upd("Update Tangent Stiffness Matrix for Interface Elements")
+                    gsm, glv, kmax = calcGSM(elNodes, nocoord, elMat, loadFaces,
+                                             interface_elements,
+                                             gravity, kn, ks, pressure, link0, link1,
+                                             ks_red)
+
+                    # modify the tangent stiffness matrix and load vector for displacement BC
+                    gsm, glv, fixdof = bcGSM(gsm, qex, dispfaces)
+                    A = scsp.csc_matrix(gsm, dtype=np.float64)
+                    factor = cholesky(A)
+                    # K_inv * External Load - required in Riks control
+                    ue = factor(b)
+
+                # K_inv * Unbalanced Force - displacement correction
                 due = factor(relax * r)
 
                 # Riks control correction to load level increment
@@ -867,10 +901,10 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
                 du += due + dl * ue
 
                 # update stresses and loads
-                sig_update, trac_update, qin = update_stress_load(elnodes, nocoord, materialbyElement,
-                                                                  sig_yield, du, np.array(interface_elements),
-                                                                  trac[step], kmax, kn, ks, shr_yield,
-                                                                  sig[step])
+                sig_update, trac_update, qin, ks_red = update_stress_load(elNodes, nocoord, materialbyElement,
+                                                                          sig_yield, du, np.array(interface_elements),
+                                                                          trac[step], kmax, kn, ks, shr_yield,
+                                                                          sig[step], link0, link1, ks_red)
 
                 sig[step + 1] = np.array([sig_update])
 
@@ -886,7 +920,7 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
                     # scale down
                     if restart == 4:
                         print("MAXIMUM RESTARTS REACHED")
-                        # raise SystemExit()
+                        raise SystemExit()
                     restart += 1
                     if step > 0:
                         dl = (lbd[step] - lbd[step - 1]) / scale_re / restart
@@ -897,10 +931,11 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
                         du = dl * ue / scale_re / restart
                     lbd[step + 1] = lbd[step] + dl
 
-                    sig_update, trac_update, qin = update_stress_load(elnodes, nocoord, materialbyElement,
-                                                                      sig_yield, du, np.array(interface_elements),
-                                                                      trac[step], kmax, kn, ks, shr_yield,
-                                                                      sig[step])
+                    sig_update, trac_update, qin, ks_red = update_stress_load(elNodes, nocoord, materialbyElement,
+                                                                              sig_yield, du,
+                                                                              np.array(interface_elements),
+                                                                              trac[step], kmax, kn, ks, shr_yield,
+                                                                              sig[step], link0, link1, ks_red)
 
                     sig[step + 1] = np.array([sig_update])
 
@@ -928,7 +963,7 @@ def calcDisp(elnodes, nocoord, dispfaces, materialbyElement, interface_elements,
         # maximum displacement increment for plotting load-displacement curve
         un = []
         for index, load in enumerate(lbd):
-            un.append(np.max(np.abs(disp[index])))
+            un.append(np.max(np.abs(disp[index])))  # TODO: ensure a single DoF is tracked
 
         # plot load-displacement curve - TODO: move to output / post-processing
         cnt = plot(un, lbd)
@@ -981,7 +1016,6 @@ def plot(un, lbd):
     bstop.on_clicked(callback.stop)
     badd = Button(axadd, 'add')
     badd.on_clicked(callback.add)
-    # fig.savefig("test.png")
     plt.show()
 
     while True:
@@ -1040,46 +1074,44 @@ def bcGSM(gsm, glv, dis):
 # update stresses and loads
 
 @jit(nopython=True, cache=True, nogil=True)
-def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
-                       interface_elements, trac, kmax, kn, ks, shr_yield, sig):
+def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, du,
+                       interface_elements, trac, kmax, kn, ks, shr_yield, sig, link0, link1, ks_red):
     gp10, gp6 = gaussPoints()
     np10, np6 = nodalPoints()
 
     # NUMBA:
-    xlv = np.zeros((3, 10), dtype=types.float64)
-    xli = np.zeros((3, 6), dtype=types.float64)
-    dmatloc = np.zeros((3, 3), dtype=types.float64)
-    T = np.zeros((3, 3), dtype=types.float64)
-    nodes = np.zeros(10, dtype=types.int64)
-    nodes_int = np.zeros(12, dtype=types.int64)
+    xlv = np.zeros((3, 10), dtype=types.float64)  # nodal coordinates volume element
+    xli = np.zeros((3, 6), dtype=types.float64)  # nodal coordinates interface element
+    dmatloc = np.zeros((3, 3), dtype=types.float64)  # local material stiffness matrix
+    T = np.zeros((3, 3), dtype=types.float64)  # coordinate transformation matrix
+    nodes = np.zeros(10, dtype=types.int64)  # node numbers single volume element
+    nodes_int = np.zeros(12, dtype=types.int64)  # node numbers single interface element
     u10 = np.zeros((30), dtype=types.float64)  # displacements for the 10 tetrahedral nodes
     u12 = np.zeros((36), dtype=types.float64)  # displacements for the 12 triangular node pairs
-    sig_update = np.zeros(24 * len(elnodes), dtype=types.float64)
-    trac_update = np.zeros(18 * len(interface_elements), dtype=types.float64)
+    sig_update = np.zeros(24 * len(elNodes), dtype=types.float64)  # updated stresses
+    trac_update = np.zeros(18 * len(interface_elements), dtype=types.float64)  # updated tractions
     qin = np.zeros(3 * len(nocoord), dtype=types.float64)  # internal load vector
-
-
 
     # ORIGINAL PYTHON:
     # xlv = np.zeros((3, 10), dtype=np.float64)
     # xli = np.zeros((3, 6), dtype=np.float64)
-    # dmatloc=np.zeros((3,3), dtype=np.float64)
-    # T=np.zeros((3,3), dtype=np.float64)
-    # nodes=np.zeros(10, dtype=int)
-    # nodes_int=np.zeros(12, dtype=int)
+    # dmatloc = np.zeros((3, 3), dtype=np.float64)
+    # T = np.zeros((3, 3), dtype=np.float64)
+    # nodes = np.zeros(10, dtype=int)
+    # nodes_int = np.zeros(12, dtype=int)
     # u10 = np.zeros((30), dtype=np.float64)  # displacements for the 10 tetrahedral nodes
     # u12 = np.zeros((36), dtype=np.float64)  # displacements for the 12 triangular node pairs
-    # sig_update = np.zeros(24 * len(elnodes), dtype=np.float64)
+    # sig_update = np.zeros(24 * len(elNodes), dtype=np.float64)
     # trac_update = np.zeros(18 * len(interface_elements), dtype=np.float64)
     # qin = np.zeros(3 * len(nocoord), dtype=np.float64)  # internal load vector
 
     # VOLUME ELEMENTS
-    for el in range(len(elnodes)):
+    for el in range(len(elNodes)):
         for i in range(10):
-            nodes[i] = elnodes[el][i]
-        elpos = 24 * el
-        dmat = hooke(el, materialbyElement)
-        elv = np.zeros((30), dtype=np.float64)
+            nodes[i] = elNodes[el][i]
+        elpos = 24 * el  # 4 integration points with 6 stress components each
+        dmat = hooke(el, materialbyElement)  # local material stiffness matrix
+        elv = np.zeros((30), dtype=np.float64)  # element load vector, 10 nodes with 3 load components each
         # xl = np.array([nocoord[nd-1] for nd in nodes]).T
         for index, nd in enumerate(nodes):
             for i in range(3):
@@ -1090,7 +1122,6 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
             u10[i3 + 1] = du[n3 + 1]
             u10[i3 + 2] = du[n3 + 2]
         index = -1
-        # for ip in gp10:
         for i in range(4):
             index += 1
             ip = gp10[i]
@@ -1135,19 +1166,17 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
                 qin[iglob3 + k] += elv[i3 + k]
 
     # INTERFACE ELEMENTS
-    for el in range(len(interface_elements)):
 
+    for el in range(len(interface_elements)):
         if interface_elements[0][0] == 0: break
 
         for i in range(12):
             nodes_int[i] = interface_elements[el][i]
 
-        elpos = 18 * el
+        elpos = 18 * el  # 6 integration points with 3 stress components each
 
         # material matrix in local coordinate system
         dmatloc[0][0] = kn * kmax
-        dmatloc[1][1] = ks * kmax
-        dmatloc[2][2] = ks * kmax
 
         # element nodal displacements
         for index, nd in enumerate(nodes_int):
@@ -1156,7 +1185,7 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
             u12[i3] = du[n3]
             u12[i3 + 1] = du[n3 + 1]
             u12[i3 + 2] = du[n3 + 2]
-        inelv = np.zeros((36), dtype=np.float64)
+        inelv = np.zeros((36), dtype=np.float64)  # interface element load vector, 12 nodes with 3 load components each
 
         for i in range(6):
             nd = nodes_int[i]
@@ -1164,6 +1193,8 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
                 xli[j][i] = nocoord[nd - 1][j]
 
         for i in range(6):
+            dmatloc[1][1] = ks_red[6 * el + i] * ks * kmax
+            dmatloc[2][2] = ks_red[6 * el + i] * ks * kmax
             ip = gp6[i]
             nppos = elpos + 3 * i
             xi = ip[0]
@@ -1174,26 +1205,39 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
             T[1] = xx
             T[2] = xt
 
-            dmatglob = np.dot(T.T, np.dot(dmatloc, T))
+            # initial interface stress in local coordinates
+            int_stress_ini = np.dot(trac[nppos:nppos + 3], T.T)
 
-            # elastic test stress in global coordinates
-            trac_test_global = trac[nppos:nppos + 3] + np.dot(dmatglob, np.dot(bmat, u12))
+            # interface strain increment in local coordinates
+            int_strain_inc = np.dot(np.dot(bmat, u12), T.T)
 
-            # elastic test stress in local coordinates
-            trac_test_local = np.dot(trac_test_global, T.T)
+            # test stress increment in local coordinates
+            int_stress_inc = np.dot(dmatloc, int_strain_inc)
 
-            normal = trac_test_local[0]
-            shear1 = trac_test_local[1]
-            shear2 = trac_test_local[2]
-            fac = min(shr_yield/np.sqrt(shear1**2 + shear2**2), 1.0)
+            # total test stress in local coordinates
+            int_stress_tot = int_stress_ini + int_stress_inc
 
-            npstress_local = np.array([normal, fac*shear1, fac*shear2])
-            npstress_global = np.dot(T.T, npstress_local)
+            normal = int_stress_tot[0]
+            shear1 = int_stress_tot[1]
+            shear2 = int_stress_tot[2]
+            shear = np.sqrt(shear1 ** 2 + shear2 ** 2)
+            if shear != 0.0:
+                fac = min(shr_yield / shear, 1.0)
+            else:
+                fac = 1.0
 
-            trac_update[nppos:nppos + 3] = npstress_global
+            if fac < 1.0: ks_red[6 * el + i] = 0.01  # assumed tangent stiffness value
+
+            # updated stress in local coordinates
+            int_stress_loc = np.array([normal, fac * shear1, fac * shear2])
+
+            # updated stress in global coordinates
+            int_stress_glo = np.dot(T.T, int_stress_loc)
+
+            trac_update[nppos:nppos + 3] = int_stress_glo
 
             # integrate element load vector
-            inelv += np.dot(bmat.T, npstress_global) * abs(xsj) * ip[2]
+            inelv += np.dot(bmat.T, int_stress_glo) * abs(xsj) * ip[2]
 
         for i in range(12):
             iglob = nodes_int[i] - 1
@@ -1202,11 +1246,22 @@ def update_stress_load(elnodes, nocoord, materialbyElement, sig_yield, du,
             for k in range(3):
                 qin[iglob3 + k] += inelv[i3 + k]
 
-    return sig_update, trac_update, qin
+    # STIFF LINK FORCES
+    stiff = 100 * kmax
+    for index, node in enumerate(link0):
+        if node != 0:
+            n3a = 3 * (int(node) - 1)
+            n3b = 3 * (int(link1[index]) - 1)
+            for i in range(3):
+                flink = stiff * (du[n3a + i] - du[n3b + i])
+                qin[n3a + i] += flink
+                qin[n3b + i] -= flink
+
+    return sig_update, trac_update, qin, ks_red
 
 
 # map stresses to nodes
-def mapStresses(elnodes, nocoord, interface_elements, disp, sig, trac, noce):
+def mapStresses(elNodes, nocoord, interface_elements, disp, sig, trac, noce):
     # map maps corner node stresses to all tet10 nodes
     map = np.array([[1.0, 0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0, 0.0],
@@ -1221,8 +1276,8 @@ def mapStresses(elnodes, nocoord, interface_elements, disp, sig, trac, noce):
 
     expm = np.zeros((4, 4), dtype=np.float64)  # extrapolation matrix from Gauss points to corner nodes
     expm_int = np.zeros((6, 6), dtype=np.float64)  # extrapolation matrix from Integration Points to 6 tri6 nodes
-    ipstress = np.zeros((4, 6), dtype=np.float64)  # Tet10 stresses by Gauss point
-    iptrac = np.zeros((6, 3), dtype=np.float64)  # Tri6 tractions by integration point
+    ipstress = np.zeros((4, 6), dtype=np.float64)  # Tet10 stresses by Gauss point (4 GP and 6 components)
+    iptrac = np.zeros((6, 3), dtype=np.float64)  # Tri6 tractions by integration point (6 GP and 3 components)
 
     ip10, ip6 = gaussPoints()
     np10, np6 = nodalPoints()
@@ -1235,12 +1290,12 @@ def mapStresses(elnodes, nocoord, interface_elements, disp, sig, trac, noce):
     xp_node = np.zeros((6, 3), dtype=np.float64)  # normal vector in each of the 6 integration points
     xx_node = np.zeros((6, 3), dtype=np.float64)  # Xi tangential vector in each of the 6 integration points
     xt_node = np.zeros((6, 3),
-                       dtype=np.float64)  # shear vector ppd to the above 2 vectors in each of the 6 integration points
+                       dtype=np.float64)  # shear vector perpendicular to the above 2 vectors in each of the 6 integration points
 
     step = len(sig) - 1  # last step in the results
 
     # map stresses in volumes to nodal points
-    for el, nodes in enumerate(elnodes):
+    for el, nodes in enumerate(elNodes):
         elpos = 24 * el
         xl = np.array([nocoord[nd - 1] for nd in nodes]).T
         for index, ip in enumerate(ip10):
@@ -1290,7 +1345,7 @@ def mapStresses(elnodes, nocoord, interface_elements, disp, sig, trac, noce):
 
 
 # fill resultobject with results
-def pasteResults(doc, elnodes, nocoord, interface_elements, dis, tet10stress, contactpressurevector,
+def pasteResults(doc, elNodes, nocoord, interface_elements, dis, tet10stress, contactpressurevector,
                  contactpressurevalue, contactshearvector):
     analysis = doc.getObject("Analysis")
 
@@ -1313,7 +1368,7 @@ def pasteResults(doc, elnodes, nocoord, interface_elements, dis, tet10stress, co
         volnodes[index + 1] = App.Vector(coord[0], coord[1], coord[2])
         mode_disp_vol[index + 1] = App.Vector(dis[n3], dis[n3 + 1], dis[n3 + 2])
 
-    for index, elem in enumerate(elnodes):
+    for index, elem in enumerate(elNodes):
         elements_tetra10[index + 1] = (
             elem[0], elem[2], elem[1], elem[3], elem[6], elem[5], elem[4], elem[7], elem[9], elem[8])
 

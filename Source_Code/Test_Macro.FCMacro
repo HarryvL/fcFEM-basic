@@ -1,0 +1,54 @@
+import FreeCAD
+import FemGui
+import ObjectsFem
+
+App.ActiveDocument.addObject("Part::Box","Box")
+App.ActiveDocument.ActiveObject.Label = "Cube"
+App.ActiveDocument.recompute()
+ObjectsFem.makeAnalysis(FreeCAD.ActiveDocument, 'Analysis')
+FemGui.setActiveAnalysis(FreeCAD.ActiveDocument.ActiveObject)
+ObjectsFem.makeSolverCalculixCcxTools(FreeCAD.ActiveDocument)
+FemGui.getActiveAnalysis().addObject(FreeCAD.ActiveDocument.ActiveObject)
+ObjectsFem.makeMeshGmsh(FreeCAD.ActiveDocument, 'FEMMeshGmsh')
+FreeCAD.ActiveDocument.ActiveObject.Part = FreeCAD.ActiveDocument.Box
+FemGui.getActiveAnalysis().addObject(FreeCAD.ActiveDocument.ActiveObject)
+FreeCADGui.ActiveDocument.setEdit(FreeCAD.ActiveDocument.ActiveObject.Name)
+App.activeDocument().addObject("Fem::ConstraintPressure","ConstraintPressure")
+App.activeDocument().ConstraintPressure.Pressure = 1000.0
+App.activeDocument().ConstraintPressure.Reversed = False
+App.activeDocument().ConstraintPressure.Scale = 1
+App.activeDocument().Analysis.addObject(App.activeDocument().ConstraintPressure)
+for amesh in App.activeDocument().Objects:
+    if "ConstraintPressure" == amesh.Name:
+        amesh.ViewObject.Visibility = True
+    elif "Mesh" in amesh.TypeId:
+        aparttoshow = amesh.Name.replace("_Mesh","")
+        for apart in App.activeDocument().Objects:
+            if aparttoshow == apart.Name:
+                apart.ViewObject.Visibility = True
+        amesh.ViewObject.Visibility = False
+
+App.ActiveDocument.recompute()
+App.ActiveDocument.ConstraintPressure.Pressure = 1000.000000
+App.ActiveDocument.ConstraintPressure.Reversed = False
+App.ActiveDocument.ConstraintPressure.Scale = 1
+App.ActiveDocument.ConstraintPressure.References = [(App.ActiveDocument.Box,"Face6")]
+App.ActiveDocument.recompute()
+App.activeDocument().addObject("Fem::ConstraintFixed","ConstraintFixed")
+App.activeDocument().ConstraintFixed.Scale = 1
+App.activeDocument().Analysis.addObject(App.activeDocument().ConstraintFixed)
+for amesh in App.activeDocument().Objects:
+    if "ConstraintFixed" == amesh.Name:
+        amesh.ViewObject.Visibility = True
+    elif "Mesh" in amesh.TypeId:
+        aparttoshow = amesh.Name.replace("_Mesh","")
+        for apart in App.activeDocument().Objects:
+            if aparttoshow == apart.Name:
+                apart.ViewObject.Visibility = True
+        amesh.ViewObject.Visibility = False
+App.ActiveDocument.recompute()
+App.ActiveDocument.ConstraintFixed.Scale = 1
+App.ActiveDocument.ConstraintFixed.References = [(App.ActiveDocument.Box,"Face5")]
+App.ActiveDocument.recompute()
+FemGui.getActiveAnalysis().addObject(ObjectsFem.makeMaterialSolid(FreeCAD.ActiveDocument))
+FreeCADGui.ActiveDocument.setEdit(FreeCAD.ActiveDocument.ActiveObject.Name)
