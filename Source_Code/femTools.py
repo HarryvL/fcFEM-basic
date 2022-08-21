@@ -53,11 +53,11 @@ def prn_upd(*args):
 def setUpAnalysis():
     doc = App.ActiveDocument
     mesh = doc.getObject("FEMMeshGmsh").FemMesh
-    if mesh == None:
+    if mesh is None:
         prn_upd("No Gmsh object. Please create one first")
         raise SystemExit()
     analysis = doc.getObject("Analysis")
-    if analysis == None:
+    if analysis is None:
         prn_upd("No Analysis object. Please create one first")
         raise SystemExit()
     # purge result objects
@@ -1349,7 +1349,7 @@ def pasteResults(doc, elNodes, nocoord, interface_elements, dis, tet10stress, co
                  contactpressurevalue, contactshearvector):
     analysis = doc.getObject("Analysis")
 
-    if analysis == None:
+    if analysis is None:
         prn_upd("No Analysis object. Please create one first")
         raise SystemExit()
 
