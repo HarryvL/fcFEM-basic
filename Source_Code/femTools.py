@@ -53,11 +53,11 @@ def prn_upd(*args):
 def setUpAnalysis():
     doc = App.ActiveDocument
     mesh = doc.getObject("FEMMeshGmsh").FemMesh
-    if mesh == None:
+    if mesh is None:
         prn_upd("No Gmsh object. Please create one first")
         raise SystemExit()
     analysis = doc.getObject("Analysis")
-    if analysis == None:
+    if analysis is None:
         prn_upd("No Analysis object. Please create one first")
         raise SystemExit()
     # purge result objects
@@ -588,7 +588,7 @@ def nodalPoints():
     return np10, np6
 
 
-# caculate the global stiffness matrix and load vector
+# calculate the global stiffness matrix and load vector
 @jit(nopython=True, cache=True)
 def calcGSM(elNodes, nocoord, materialbyElement, loadfaces, interface_elements,
             grav, kn, ks, pressure, link0, link1, ks_red):
@@ -1349,7 +1349,7 @@ def pasteResults(doc, elNodes, nocoord, interface_elements, dis, tet10stress, co
                  contactpressurevalue, contactshearvector):
     analysis = doc.getObject("Analysis")
 
-    if analysis == None:
+    if analysis is None:
         prn_upd("No Analysis object. Please create one first")
         raise SystemExit()
 
