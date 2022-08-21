@@ -33,7 +33,7 @@ Please refer to source code for in-line comments and to the FreeCAD forum (https
 - [ ] Frictional material for the analysis of soils and concrete.
 - [ ] Tension cut-off and reinforcement capabilities.
 - [ ] Large deformation analysis capability.
-Addition of beam and shell elements.
+- [ ] Addition of beam and shell elements.
 - [ ] Linear buckling and initial imperfections for non-linear buckling.
 - [ ] Loading stages.
 - [ ] Advanced material modelling.
