@@ -20,8 +20,10 @@
 # *                                                                         *
 # ***************************************************************************
 
+import os
 import sys
 import time
+import FreeCAD as App
 import FreeCADGui as Gui
 import cProfile
 
@@ -52,22 +54,33 @@ timer = [["extract information from FreeCAD objects....................... " + f
          ["map stresses to nodal points................................... " + fmt + " seconds", []],
          ["paste results in the FEM result object......................... " + fmt + " seconds", []]]
 
+
+mdir = App.getUserMacroDir(True)
+name = App.ActiveDocument.Name
+with open(mdir+'/'+name+'.inp', encoding='utf8') as f:
+    file_raw = f.readlines()
+
+fc = []
+for line in file_raw:
+    list = (line.strip()).split()
+    fc.append(list)
+
 # material input values - TODO: merge with FEM WB input dialogues
-gravity = - 20.0e-06  # specific gravity acting in z-direction [N/mm3] = [1.0e+6 kN/m3]
-sig_yield = 0.02  # yield stress [MPa] for volume elements (von Mises material)
-shr_yield = 1.  # yield stress [MPa] for interface elements (Cohesive material)
-kn = 1.0   # interface elastic normal stiffness factor (0.0 < kn <1.0)
-ks = 1.0   # interface elastic shear stiffness factor (0.0 < ks <1.0)
+gravity = float(fc[0][0])  # specific gravity acting in z-direction [N/mm3] = [1.0e+6 kN/m3]
+sig_yield = float(fc[1][0])  # yield stress [MPa] for volume elements (von Mises material)
+shr_yield = float(fc[2][0])  # yield stress [MPa] for interface elements (Cohesive material)
+kn = float(fc[3][0])   # interface elastic normal stiffness factor (0.0 < kn <1.0)
+ks = float(fc[4][0])   # interface elastic shear stiffness factor (0.0 < ks <1.0)
 
 # control input values - TODO: merge with FEM WB input dialogues
-out_disp = -100000  # +n: output total discplacment at step n ; -n: output incremental discplacement at step n (if n>last step then n=last step)
-nstep = 30  # number of load steps per run (default = 10). nstep == 1: elastic analysis
-iterat_max = 20  # max number of iterations per step - this triggers a scale-down and restart
-error_max = 1.0e-03  # convergence tolerance (default = 1.0e-03)
-relax = 1.2  # numerical over-relaxation (1.0 < relax < 1.5; default = 1.2)
-scale_re = 2.0  # scale factor for re-start (default = 2.0)
-scale_up = 1.2  # scale up for fast convergence (default = 1.2)
-scale_dn = 1.2  # scale down for slow convergence (default = 1.2)
+out_disp = int(fc[5][0])  # +n: output total discplacment at step n ; -n: output incremental discplacement at step n (if n>last step then n=last step)
+nstep = int(fc[6][0])  # number of load steps per run (default = 10). nstep == 1: elastic analysis
+iterat_max = float(fc[7][0])  # max number of iterations per step - this triggers a scale-down and restart
+error_max = float(fc[8][0])  # convergence tolerance (default = 1.0e-03)
+relax = float(fc[9][0])  # numerical over-relaxation (1.0 < relax < 1.5; default = 1.2)
+scale_re = float(fc[10][0])  # scale factor for re-start (default = 2.0)
+scale_up = float(fc[11][0])  # scale up for fast convergence (default = 1.2)
+scale_dn = float(fc[12][0])  # scale down for slow convergence (default = 1.2)
 
 # extract information from FreeCAD objects
 Gui.updateGui()
