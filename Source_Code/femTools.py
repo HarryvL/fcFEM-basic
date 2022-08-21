@@ -588,7 +588,7 @@ def nodalPoints():
     return np10, np6
 
 
-# caculate the global stiffness matrix and load vector
+# calculate the global stiffness matrix and load vector
 @jit(nopython=True, cache=True)
 def calcGSM(elNodes, nocoord, materialbyElement, loadfaces, interface_elements,
             grav, kn, ks, pressure, link0, link1, ks_red):
