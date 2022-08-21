@@ -9,16 +9,14 @@ fcFEM is a general finite element framework for 3D deformation analysis, current
 <img src="https://user-images.githubusercontent.com/35259498/55271898-c2f5f280-52b4-11e9-89a4-a8899e6b0976.png" height="200"/> <img src="https://user-images.githubusercontent.com/35259498/55271891-c0939880-52b4-11e9-9353-ed804a4bf2bc.png" height="200"/>
 
 ### Background
-
+fcFEM is a finite element solver for performing collapse analysis of structures and soil bodies. It is based on the theory of plasticity and gives insight in ductility and reserve strength beyond first yield. The theory underpinning fcFEM can be found in the document included in this repository.
 
 
 ### Prerequisites
-
 * FreeCAD >= v0.20
 
 
 ### Installation
-
 1. Manually install the following files `fcFEM.FCMacro`, `femTools.py` and the `name.inp` in a single directory on your machine, where name is the same as the `name.FCStd` file of the freeCAD problem.  
 1. Within the [FreeCAD macro dialog](https://wiki.freecad.org/Macros) set the macro path to the above directory.  
 1. Run `fcFEM.FCMacro` with the FreeCAD macro editor. 
