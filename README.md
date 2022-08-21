@@ -10,11 +10,8 @@ fcFEM is a general finite element framework for 3D deformation analysis, current
 
 ### Installation and running
 Install files fcFEM.FCMacro, femTools.py and the name.inp files in a single directory on your machine, where name is the same as the name.FCStd file of the freeCAD problem
-
 In the macro dialogue set the macro path to the above directory
-
 Run fcFEM.FCMacro with the FreeCAD macro editor
-
 fcFEM requires FreeCAD version 0.20 or higher
 
 <img src="https://user-images.githubusercontent.com/35259498/55271895-c1c4c580-52b4-11e9-9427-e643a688b36d.jpg" width="450"/>
@@ -26,17 +23,11 @@ Please refer to source code for in-line comments and to the FreeCAD forum (https
 
 ### TODO
 Frictional material for the analysis of soils and concrete
-
 Tension cut-off and reinforcement capabilities
-
 Large deformation analysis capability
-
 Addition of beam and shell elements
-
 Linear buckling and initial imperfections for non-linear buckling
-
 Loading stages
-
 Advanced material modelling  
 
 ### Licence information
