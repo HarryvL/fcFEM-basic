@@ -17,7 +17,7 @@ fcFEM is a finite element solver for performing collapse analysis of structures 
 
 
 ### Installation
-1. Manually install the following files `fcFEM.FCMacro`, `femTools.py` and the `name.inp` in a single directory on your machine, where name is the same as the `name.FCStd` file of the freeCAD problem.  
+1. Manually install the following files `fcFEM.FCMacro`, `femTools.py` and the `"name".inp`files in a single directory on your machine, where "name" comes from the "name".FCStd` file of the freeCAD problem.  
 1. Within the [FreeCAD macro dialog](https://wiki.freecad.org/Macros) set the macro path to the above directory.  
 1. Run `fcFEM.FCMacro` with the FreeCAD macro editor. 
 
