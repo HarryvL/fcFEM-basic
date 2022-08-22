@@ -3,29 +3,23 @@ Finite Element macro for [FreeCAD](https://freecad.org)
 
 <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Slope_Clay_Fine_PV.png" height="200"/> <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Slope_Clay_Fine.png" height="220" raw=true/> 
 
-### Description
-fcFEM is a general finite element framework for 3D deformation analysis, currently supporting elasto-plastic collapse analysis and interface elements
-
-<img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/punch_indentation_VTK.png" height="200"/> <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Plate_with_Hole_3.png" height="200"/>
-
 ### Background
 fcFEM is a finite element solver for performing collapse analysis of structures and soil bodies. It is based on the theory of plasticity and gives insight in ductility and reserve strength beyond first yield. The theory underpinning fcFEM can be found in the document included in this repository.
 
+<img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/punch_indentation_VTK.png" height="200"/>
 
 ### Prerequisites
 * FreeCAD >= v0.20
 
-
 ### Installation
 1. Manually install the following files `fcFEM.FCMacro`, `femTools.py` and the `"name".inp`files in a single directory on your machine, where "name" comes from the "name".FCStd` file of the freeCAD problem.  
 1. Within the [FreeCAD macro dialog](https://wiki.freecad.org/Macros) set the macro path to the above directory.  
-1. Run `fcFEM.FCMacro` with the FreeCAD macro editor. 
+1. Run `fcFEM.FCMacro` with the FreeCAD macro editor.
 
-<img src="https://user-images.githubusercontent.com/35259498/55271895-c1c4c580-52b4-11e9-9427-e643a688b36d.jpg" width="450"/>
+<img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Plate_with_Hole_3.png" height="200"/>
 
 ### Documentation
 Please refer to source code for in-line comments and to the FreeCAD forum (https://forum.freecadweb.org/viewforum.php?f=18)
-
 
 ### TODO
 
@@ -36,6 +30,8 @@ Please refer to source code for in-line comments and to the FreeCAD forum (https
 - [ ] Linear buckling and initial imperfections for non-linear buckling.
 - [ ] Loading stages.
 - [ ] Advanced material modelling.
+
+<img src="https://user-images.githubusercontent.com/35259498/55271895-c1c4c580-52b4-11e9-9427-e643a688b36d.jpg" width="450"/>
 
 ### Licence information
 
