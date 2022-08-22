@@ -26,7 +26,6 @@ fcFEM is a finite element solver for performing collapse analysis of structures 
 ### Documentation
 Please refer to source code for in-line comments and to the FreeCAD forum (https://forum.freecadweb.org/viewforum.php?f=18)
 
-<img src="https://user-images.githubusercontent.com/35259498/55271897-c25d5c00-52b4-11e9-986d-76669f87216d.jpg" height="200"/> <img src="https://user-images.githubusercontent.com/35259498/55271896-c1c4c580-52b4-11e9-96b6-f5846bb35fb1.png" height="200"/>
 
 ### TODO
 
