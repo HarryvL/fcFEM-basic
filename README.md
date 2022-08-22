@@ -1,7 +1,7 @@
 # fcFEM-basic
 Finite Element macro for [FreeCAD](https://freecad.org)
 
-<img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Slope_Clay_Coarse.png" height="220" raw=true/> <img src="https://user-images.githubusercontent.com/35259498/55271882-bd98a800-52b4-11e9-912f-b319b0c0694f.png" height="200"/>
+<img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Slope_Clay_Coarse.png" height="220" raw=true/> <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Slope_Clay_Fine_PV.png" height="200"/>
 
 ### Description
 fcFEM is a general finite element framework for 3D deformation analysis, currently supporting elasto-plastic collapse analysis and interface elements
