@@ -31,7 +31,7 @@ Please refer to source code for in-line comments and to the FreeCAD forum (https
 - [ ] Loading stages.
 - [ ] Advanced material modelling.
 
-<img src="https://user-images.githubusercontent.com/35259498/55271895-c1c4c580-52b4-11e9-9427-e643a688b36d.jpg" width="450"/>
+<img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Beam_Collapse%20(2).jpg" width="450"/>
 
 ### Licence information
 
