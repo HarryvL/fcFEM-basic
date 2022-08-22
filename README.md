@@ -4,7 +4,7 @@ Finite Element macro for [FreeCAD](https://freecad.org)
 <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Slope_Clay_Fine_PV.png" height="200"/> <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Slope_Clay_Fine.png" height="220" raw=true/> 
 
 ### Background
-fcFEM is a finite element solver for performing collapse analysis of structures and soil bodies. It is based on the theory of plasticity and gives insight in ductility and reserve strength beyond first yield. The theory underpinning fcFEM can be found in the document included in this repository.
+fcFEM is a finite element solver for performing collapse analysis of structures and soil bodies. It is based on the theory of elastoplasticity and gives insight in ductility and reserve strength beyond first yield. The theory underpinning fcFEM can be found in the document included in this repository.
 
 <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/punch_indentation_VTK.png" height="200"/>
 
