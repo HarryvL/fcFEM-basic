@@ -6,7 +6,7 @@ Finite Element macro for [FreeCAD](https://freecad.org)
 ### Description
 fcFEM is a general finite element framework for 3D deformation analysis, currently supporting elasto-plastic collapse analysis and interface elements
 
-<img src="https://user-images.githubusercontent.com/35259498/55271898-c2f5f280-52b4-11e9-89a4-a8899e6b0976.png" height="200"/> <img src="https://user-images.githubusercontent.com/35259498/55271891-c0939880-52b4-11e9-9353-ed804a4bf2bc.png" height="200"/>
+<img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/punch_indentation_VTK.png" height="200"/> <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Plate_with_Hole_3.png" height="200"/>
 
 ### Background
 fcFEM is a finite element solver for performing collapse analysis of structures and soil bodies. It is based on the theory of plasticity and gives insight in ductility and reserve strength beyond first yield. The theory underpinning fcFEM can be found in the document included in this repository.
