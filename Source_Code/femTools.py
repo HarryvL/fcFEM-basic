@@ -791,7 +791,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
     if qnorm < 1.0: qnorm = 1.0
 
     # modify the global stiffness matrix and load vector for displacement BC
-    gsm, glv, fixdof = bcGSM(gsm, glv, dispfaces)
+    gsm, glv, fixdof, movdof = bcGSM(gsm, glv, dispfaces)
 
     if np.min(np.diag(gsm)) <= 0.0:
         prn_upd("non positive definite matrix - check input")
@@ -821,6 +821,17 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
     trac = np.array([np.zeros((18 * max(ninter, 1)), dtype=np.float64)])  # contact stress in Tri6
     disp = np.array([np.zeros((ndof), dtype=np.float64)])  # displacement results
     lbd = np.zeros((1), dtype=np.float64)  # load level
+    rfl = np.zeros((1), dtype=np.float64)  # reaction force level (for displacement control)
+
+    # determine elastic reaction force on moving boundary
+    if max(movdof) == 1:
+        sig_update, trac_update, qelastic, ks_red = update_stress_load(elNodes, nocoord, materialbyElement,
+                                                                  sig_yield, ue, np.array(interface_elements),
+                                                                  trac[0], kmax, kn, ks, shr_yield, sig[0],
+                                                                  link0, link1, ks_red)
+        qelastic *= movdof
+        qelnorm = np.linalg.norm(qelastic)
+        qnorm = qelnorm
 
     step = -1
     cnt = True
@@ -833,6 +844,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
         out_disp = 1
         un = [0.]
         lbd = np.append(lbd, 1.0)
+        rfl = np.append(rfl, 1.0)
         disp = np.append(disp, [ue], axis=0)
         un.append(np.max(np.abs(disp[1])))
         cnt = False
@@ -843,10 +855,8 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
             step += 1
             restart = 0
             prn_upd("Step: {}".format(step))
-            # Riks control vector
-            a = du
-            # lbd = load level
-            lbd = np.append(lbd, lbd[step] + dl)
+            a = du  # a: Riks control vector
+            lbd = np.append(lbd, lbd[step] + dl)  # lbd: load level
 
             # update stresses and loads
 
@@ -884,7 +894,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
                                              ks_red)
 
                     # modify the tangent stiffness matrix and load vector for displacement BC
-                    gsm, glv, fixdof = bcGSM(gsm, qex, dispfaces)
+                    gsm, glv, fixdof, movdof = bcGSM(gsm, qex, dispfaces)
                     A = scsp.csc_matrix(gsm, dtype=np.float64)
                     factor = cholesky(A)
                     # K_inv * External Load - required in Riks control
@@ -915,6 +925,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
                 rnorm = np.linalg.norm(r)
                 error = rnorm / qnorm
                 prn_upd("Iteration: {}, Error: {}".format(iterat, error))
+
 
                 if iterat > iterat_max:
                     # scale down
@@ -950,6 +961,8 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
             # update results at end of converged load step
             disp = np.append(disp, [disp[step] + du], axis=0)
             dl = lbd[step + 1] - lbd[step]
+            if max(movdof) == 1:
+                rfl = np.append(rfl, np.linalg.norm(qin) / qelnorm)
 
             if iterat > 10:
                 # scale down
@@ -966,7 +979,11 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
             un.append(np.max(np.abs(disp[index])))  # TODO: ensure a single DoF is tracked
 
         # plot load-displacement curve - TODO: move to output / post-processing
-        cnt = plot(un, lbd)
+        if max(movdof) == 1:
+            print(len(un), len(rfl))
+            cnt = plot(un, rfl)
+        else:
+            cnt = plot(un, lbd)
 
     out = min(step + 1, abs(int(out_disp)))
     if out_disp > 0:
@@ -1034,15 +1051,30 @@ def bcGSM(gsm, glv, dis):
     # fixdof=1: DOF is free; fixdof=0: DOF is fixed - used in calculation of residual load
     fixdof = np.ones((dim), dtype=int)
 
+    # movdof=1: DOF is forced to move; movdof=0: DOF is free or fixed
+    movdof = np.zeros((dim), dtype=int)
+
     for lf in dis:
         lx = lf[1][0]  # True: free x-DOF; False: fixed x-DOF
         ly = lf[1][1]  # True: free y-DOF; False: fixed y-DOF
         lz = lf[1][2]  # True: free z-DOF; False: fixed z-DOF
         ux = uy = uz = 0.0
 
-        if not lx: ux = lf[2][0]  # prescribed displacement in x-direction
-        if not ly: uy = lf[2][1]  # prescribed displacement in y-direction
-        if not lz: uz = lf[2][2]  # prescribed displacement in z-direction
+        if not lx:
+            ux = lf[2][0]  # prescribed displacement in x-direction
+            if ux != 0.0:
+                for node in lf[0]:
+                    movdof[3 * (int(node) - 1)] = 1
+        if not ly:
+            uy = lf[2][1]  # prescribed displacement in y-direction
+            if uy != 0.0:
+                for node in lf[0]:
+                    movdof[3 * (int(node) - 1) + 1] = 1
+        if not lz:
+            uz = lf[2][2]  # prescribed displacement in z-direction
+            if uz != 0.0:
+                for node in lf[0]:
+                    movdof[3 * (int(node) - 1) + 2] = 1
 
         for node in lf[0]:
             n3 = 3 * (int(node) - 1)
@@ -1068,7 +1100,7 @@ def bcGSM(gsm, glv, dis):
                 gsm[n3 + 2, n3 + 2] = 1.0
                 glv[n3 + 2] = uz
 
-    return gsm, glv, fixdof
+    return gsm, glv, fixdof, movdof
 
 
 # update stresses and loads
