@@ -23,7 +23,7 @@ Please refer to source code for in-line comments and to the FreeCAD forum (https
 
 ### TODO
 
-- [ ] Frictional material for the analysis of soils and concrete.
+- [#1] Frictional material for the analysis of soils and concrete.
 - [ ] Tension cut-off and reinforcement capabilities.
 - [ ] Large deformation analysis capability.
 - [ ] Addition of beam and shell elements.
