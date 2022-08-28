@@ -798,16 +798,11 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
         raise SystemExit()
 
     # Cholesky decomposition of the global stiffness matrix and elastic solution
-    # TODO: apply reverse Cuthill McKee and banded Cholesky to speed things up
-    # TODO: experiment with Intel Distribution for Python (Math Kernal Library) to optimize speed
-
     # using cholmod
-    A = scsp.csc_matrix(gsm, dtype=np.float64)
-    b = glv
     t0 = time.time()
-    factor = cholesky(A)
+    factor = cholesky(scsp.csc_matrix(gsm, dtype=np.float64))
     t1 = time.time()
-    ue = factor(b)  # elastic solution
+    ue = factor(glv)  # elastic solution
     t2 = time.time()
     prn_upd("Sparse Cholesky Decomposition: {} log10(s), Solution: {} log10(s)".format(np.log10(t1 - t0),
                                                                                        np.log10(t2 - t1)))
@@ -895,10 +890,9 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
 
                     # modify the tangent stiffness matrix and load vector for displacement BC
                     gsm, glv, fixdof, movdof = bcGSM(gsm, qex, dispfaces)
-                    A = scsp.csc_matrix(gsm, dtype=np.float64)
-                    factor = cholesky(A)
+                    factor = cholesky(scsp.csc_matrix(gsm, dtype=np.float64))
                     # K_inv * External Load - required in Riks control
-                    ue = factor(b)
+                    ue = factor(glv)
 
                 # K_inv * Unbalanced Force - displacement correction
                 due = factor(relax * r)
