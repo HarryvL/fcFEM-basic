@@ -27,6 +27,7 @@ import FreeCAD as App
 import FreeCADGui as Gui
 import cProfile
 
+
 def prn_upd(*args):
     for obj in args:
         print(str(obj), end='')
@@ -54,10 +55,9 @@ timer = [["extract information from FreeCAD objects....................... " + f
          ["map stresses to nodal points................................... " + fmt + " seconds", []],
          ["paste results in the FEM result object......................... " + fmt + " seconds", []]]
 
-
 mdir = App.getUserMacroDir(True)
 name = App.ActiveDocument.Name
-with open(mdir+'/'+name+'.inp', encoding='utf8') as f:
+with open(mdir + '/' + name + '.inp', encoding='utf8') as f:
     file_raw = f.readlines()
 
 fc = []
@@ -69,11 +69,12 @@ for line in file_raw:
 gravity = float(fc[0][0])  # specific gravity acting in z-direction [N/mm3] = [1.0e+6 kN/m3]
 sig_yield = float(fc[1][0])  # yield stress [MPa] for volume elements (von Mises material)
 shr_yield = float(fc[2][0])  # yield stress [MPa] for interface elements (Cohesive material)
-kn = float(fc[3][0])   # interface elastic normal stiffness factor (0.0 < kn <1.0)
-ks = float(fc[4][0])   # interface elastic shear stiffness factor (0.0 < ks <1.0)
+kn = float(fc[3][0])  # interface elastic normal stiffness factor (0.0 < kn <1.0)
+ks = float(fc[4][0])  # interface elastic shear stiffness factor (0.0 < ks <1.0)
 
 # control input values - TODO: merge with FEM WB input dialogues
-out_disp = int(fc[5][0])  # +n: output total discplacment at step n ; -n: output incremental discplacement at step n (if n>last step then n=last step)
+out_disp = int(fc[5][
+                   0])  # +n: output total discplacment at step n ; -n: output incremental discplacement at step n (if n>last step then n=last step)
 nstep = int(fc[6][0])  # number of load steps per run (default = 10). nstep == 1: elastic analysis
 iterat_max = float(fc[7][0])  # max number of iterations per step - this triggers a scale-down and restart
 error_max = float(fc[8][0])  # convergence tolerance (default = 1.0e-03)
@@ -95,7 +96,8 @@ prn_upd("extract information from FreeCAD objects - time taken:  ", t1 - t0, "  
 # prepare finite element input
 prn_upd("prepare finite element input\n")
 t0 = time.time()
-elNodes, noCoord, dispFaces, loadFaces, elMat, interface_elements, noce, pressure, link0, link1, ks_red= ft.setUpInput(doc, mesh, analysis)
+elNodes, noCoord, dispFaces, loadFaces, elMat, interface_elements, noce, pressure, link0, link1, ks_red = ft.setUpInput(
+    doc, mesh, analysis)
 # cProfile.runctx('elNodes, noCoord, dispFaces, loadFaces, elMat, interface_elements, noce, pressure = \
 #                     ft.setUpInput(doc, mesh, analysis)', globals(), locals())
 
@@ -106,8 +108,10 @@ prn_upd("prepare finite element input - time taken:  ", t1 - t0, "  seconds\n")
 # calculate the global stiffness matrix and global load vector
 prn_upd("calculate the global stiffness matrix and global load vector\n")
 t0 = time.time()
-globalStiffnessMatrix, globalLoadVector, kmax = ft.calcGSM(elNodes, noCoord, elMat, loadFaces, interface_elements,
-                                                           gravity, kn, ks, pressure, link0, link1, ks_red)
+globalStiffnessMatrix, globalLoadVector, kmax = ft.calcGSM(elNodes, noCoord, elMat,
+                                                           loadFaces, interface_elements,
+                                                           gravity, kn, ks, pressure, link0,
+                                                           link1, ks_red)
 # cProfile.runctx('globalStiffnessMatrix, globalLoadVector, kmax = ft.calcGSM(elNodes, noCoord, elMat, loadFaces, interface_elements, gravity, kn, ks)', globals(), locals())
 
 t1 = time.time()
@@ -120,7 +124,8 @@ Gui.updateGui()
 t0 = time.time()
 
 displacements, stresses, tractions = ft.calcDisp(elNodes, noCoord, dispFaces, elMat, interface_elements, kmax,
-                                                 globalStiffnessMatrix, globalLoadVector, nstep, iterat_max,
+                                                 globalStiffnessMatrix, globalLoadVector,
+                                                 nstep, iterat_max,
                                                  error_max, relax, scale_re, scale_up, scale_dn, sig_yield, shr_yield,
                                                  kn, ks, out_disp, link0, link1,
                                                  elMat, loadFaces, gravity, pressure, ks_red)

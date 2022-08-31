@@ -596,7 +596,6 @@ def calcGSM(elNodes, nocoord, materialbyElement, loadfaces, interface_elements,
     # np10, np6 = nodalPoints()  # required here only for Newton Coates integration
     nn = len(nocoord[:, 0])  # number of degrees of freedom
 
-    # numba
     dmatloc = np.zeros((3, 3), dtype=types.float64)  # local material stiffness matrix
     T = np.zeros((3, 3), dtype=types.float64)  # transformation matrix local-global coordinates
     xlf = np.zeros((3, 6), dtype=types.float64)  # coordinates of load face nodes
@@ -605,16 +604,6 @@ def calcGSM(elNodes, nocoord, materialbyElement, loadfaces, interface_elements,
     nodes_int = np.zeros(12, dtype=types.int64)  # interface node numbers
     gsm = np.zeros((3 * nn, 3 * nn), dtype=types.float64)  # global stiffness matrix
     glv = np.zeros((3 * nn), dtype=types.float64)  # global load vector
-
-    # no numba
-    # dmatloc = np.zeros((3, 3), dtype=np.float64)
-    # T = np.zeros((3, 3), dtype=np.float64)
-    # xlf = np.zeros((3, 6), dtype=np.float64)
-    # xlv = np.zeros((3, 10), dtype=np.float64)
-    # xli = np.zeros((3, 6), dtype=np.float64)
-    # nodes_int = np.zeros(12, dtype=np.int64)
-    # gsm = np.zeros((3 * nn, 3 * nn), dtype=np.float64)
-    # glv = np.zeros((3 * nn), dtype=np.float64)
 
     #   calculate element load vectors for pressure and add to global vector
 
@@ -751,10 +740,12 @@ def calcGSM(elNodes, nocoord, materialbyElement, loadfaces, interface_elements,
             n3b = 3 * (int(link1[index]) - 1)
             for i in range(3):
                 stiff = 100 * kmax
-                gsm[n3a + i, n3a + i] += stiff
-                gsm[n3b + i, n3b + i] += stiff
-                gsm[n3a + i, n3b + i] += -stiff
-                gsm[n3b + i, n3a + i] += -stiff
+                n1 = n3a + i
+                n2 = n3b + i
+                gsm[n1, n1] += stiff
+                gsm[n2, n2] += stiff
+                gsm[n1, n2] += -stiff
+                gsm[n2, n1] += -stiff
 
     loadsumx = 0.0
     loadsumy = 0.0
@@ -769,7 +760,8 @@ def calcGSM(elNodes, nocoord, materialbyElement, loadfaces, interface_elements,
 
 
 # calculate load-deflection curve
-def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements, kmax, gsm, glv, nstep, iterat_max,
+def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements, kmax, gsm,
+             glv, nstep, iterat_max,
              error_max, relax, scale_re,
              scale_up, scale_dn,
              sig_yield, shr_yield, kn,
@@ -821,9 +813,9 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
     # determine elastic reaction force on moving boundary
     if max(movdof) == 1:
         sig_update, trac_update, qelastic, ks_red = update_stress_load(elNodes, nocoord, materialbyElement,
-                                                                  sig_yield, ue, np.array(interface_elements),
-                                                                  trac[0], kmax, kn, ks, shr_yield, sig[0],
-                                                                  link0, link1, ks_red)
+                                                                       sig_yield, ue, np.array(interface_elements),
+                                                                       trac[0], kmax, kn, ks, shr_yield, sig[0],
+                                                                       link0, link1, ks_red)
         qelastic *= movdof
         qelnorm = np.linalg.norm(qelastic)
         qnorm = qelnorm
@@ -889,7 +881,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
                                              ks_red)
 
                     # modify the tangent stiffness matrix and load vector for displacement BC
-                    gsm, glv, fixdof, movdof = bcGSM(gsm, qex, dispfaces)
+                    gsm, glv, fixdof, movdof = bcGSM(gsm, glv, dispfaces)
                     factor = cholesky(scsp.csc_matrix(gsm, dtype=np.float64))
                     # K_inv * External Load - required in Riks control
                     ue = factor(glv)
@@ -919,7 +911,6 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
                 rnorm = np.linalg.norm(r)
                 error = rnorm / qnorm
                 prn_upd("Iteration: {}, Error: {}".format(iterat, error))
-
 
                 if iterat > iterat_max:
                     # scale down
