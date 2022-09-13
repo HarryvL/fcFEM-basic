@@ -23,6 +23,7 @@
 import os
 import sys
 import time
+import math
 import FreeCAD as App
 import FreeCADGui as Gui
 import cProfile
@@ -82,6 +83,12 @@ relax = float(fc[9][0])  # numerical over-relaxation (1.0 < relax < 1.5; default
 scale_re = float(fc[10][0])  # scale factor for re-start (default = 2.0)
 scale_up = float(fc[11][0])  # scale up for fast convergence (default = 1.2)
 scale_dn = float(fc[12][0])  # scale down for slow convergence (default = 1.2)
+phi = float(fc[13][0])  # friction angle
+psi = float(fc[14][0])  # dilation angle
+ts = float(fc[15][0])  # tensile strength [MPa]
+
+phi=math.radians(phi)
+psi=math.radians(psi)
 
 # extract information from FreeCAD objects
 Gui.updateGui()
@@ -123,12 +130,12 @@ prn_upd("solve the global stiffness matrix equation\n")
 Gui.updateGui()
 t0 = time.time()
 
-displacements, stresses, tractions = ft.calcDisp(elNodes, noCoord, dispFaces, elMat, interface_elements, kmax,
-                                                 globalStiffnessMatrix, globalLoadVector,
-                                                 nstep, iterat_max,
-                                                 error_max, relax, scale_re, scale_up, scale_dn, sig_yield, shr_yield,
-                                                 kn, ks, out_disp, link0, link1,
-                                                 elMat, loadFaces, gravity, pressure, ks_red)
+displacements, stresses, peeq, tractions = ft.calcDisp(elNodes, noCoord, dispFaces, elMat, interface_elements, kmax,
+                                                       globalStiffnessMatrix, globalLoadVector,
+                                                       nstep, iterat_max,
+                                                       error_max, relax, scale_re, scale_up, scale_dn, sig_yield, phi,
+                                                       psi, ts, shr_yield, kn, ks, out_disp, link0, link1,
+                                                       elMat, loadFaces, gravity, pressure, ks_red)
 
 # cProfile.runctx('displacements, stresses, tractions = ft.calcDisp (elNodes, noCoord, dispFaces, elMat,\
 #                                                   interface_elements, kmax,\
@@ -141,12 +148,16 @@ timer[3][1] = t1 - t0
 prn_upd("solve the global stiffness matrix equation - time taken:  ", t1 - t0, "  seconds\n")
 
 # map stresses to nodal points
-prn_upd("map stresses to nodal points\n")
+prn_upd("map stresses and strains to nodal points\n")
 t0 = time.time()
-tet10stress, contactpressurevector, contactpressurevalue, contactshearvector = ft.mapStresses(elNodes, noCoord,
-                                                                                              interface_elements,
-                                                                                              displacements, stresses,
-                                                                                              tractions, noce)
+tet10stress, tet10peeq, contactpressurevector, contactpressurevalue, contactshearvector = ft.mapStresses(elNodes,
+                                                                                                         noCoord,
+                                                                                                         interface_elements,
+                                                                                                         displacements,
+                                                                                                         stresses,
+                                                                                                         peeq,
+                                                                                                         tractions,
+                                                                                                         noce)
 t1 = time.time()
 timer[4][1] = t1 - t0
 prn_upd("map stresses to nodal points - time taken:  ", t1 - t0, "  seconds\n")
@@ -154,7 +165,7 @@ prn_upd("map stresses to nodal points - time taken:  ", t1 - t0, "  seconds\n")
 # paste results in the FEM result object
 prn_upd("paste results in the FEM result object\n")
 t0 = time.time()
-resInt, resVol = ft.pasteResults(doc, elNodes, noCoord, interface_elements, displacements, tet10stress,
+resInt, resVol = ft.pasteResults(doc, elNodes, noCoord, interface_elements, displacements, tet10stress, tet10peeq,
                                  contactpressurevector, contactpressurevalue, contactshearvector)
 t1 = time.time()
 timer[5][1] = t1 - t0
