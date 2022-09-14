@@ -1184,7 +1184,6 @@ def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, phi, psi,
 
             # von Mises stress
             p = (sig_test[0] + sig_test[1] + sig_test[2]) / 3.0
-
             sig_mises = np.sqrt(1.5 * ((sig_test[0] - p) ** 2 + (sig_test[1] - p) ** 2 + (sig_test[2] - p) ** 2) +
                                 3.0 * (sig_test[3] ** 2 + sig_test[4] ** 2 + sig_test[5] ** 2))
 
@@ -1199,6 +1198,7 @@ def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, phi, psi,
             if fe < 0.0: fe = 0.0
             dl = fe / (3.0 * G + bulk * mf * mg)
             fac = 1.0 - 3.0 * G * dl / sig_mises
+            if fac < 0.0: fac = 0.0
 
             sig_update[ippos] = fac * (sig_test[0] - p) + (p - dl * bulk * mg)
             sig_update[ippos + 1] = fac * (sig_test[1] - p) + (p - dl * bulk * mg)
