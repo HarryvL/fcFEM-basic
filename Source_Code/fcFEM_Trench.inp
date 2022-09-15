@@ -4,7 +4,7 @@
 1.0   			# kn: interface elastic normal stiffness factor (0.0 < kn <1.0)
 1.0   			# ks: interface elastic shear stiffness factor (0.0 < ks <1.0)
 -100000  		# out_disp: +n: output total discplacment at step n ; -n: output incremental discplacement at step n (if n>last step then n=last step)
-10  			# nstep: number of load steps per run (default = 10). nstep == 1: elastic analysis
+30  			# nstep: number of load steps per run (default = 10). nstep == 1: elastic analysis
 20  			# iterat_max: max number of iterations per step - this triggers a scale-down and restart
 1.0e-02  		# error_max: convergence tolerance (default = 1.0e-03)
 1.2  			# relax: numerical over-relaxation (1.0 < relax < 1.5; default = 1.2)

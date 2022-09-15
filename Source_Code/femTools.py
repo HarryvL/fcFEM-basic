@@ -1147,8 +1147,8 @@ def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, phi, psi,
         eqpos = 4 * el  # 4 integration points with 1 strain component each
         dmat = hooke(el, materialbyElement)  # local material stiffness matrix
         G = dmat[3][3]
-        nu =  materialbyElement[el][1]
-        bulk = (dmat[0][0]+dmat[0][1]+dmat[0][2])/3.0
+        nu = materialbyElement[el][1]
+        bulk = (dmat[0][0] + dmat[0][1] + dmat[0][2]) / 3.0
         sphi = np.sin(phi)
         spsi = np.sin(psi)
         cphi = np.cos(phi)
@@ -1198,11 +1198,15 @@ def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, phi, psi,
             if fe < 0.0: fe = 0.0
             dl = fe / (3.0 * G + bulk * mf * mg)
             fac = 1.0 - 3.0 * G * dl / sig_mises
-            if fac < 0.0: fac = 0.0
+            pressure = (p - dl * bulk * mg)
 
-            sig_update[ippos] = fac * (sig_test[0] - p) + (p - dl * bulk * mg)
-            sig_update[ippos + 1] = fac * (sig_test[1] - p) + (p - dl * bulk * mg)
-            sig_update[ippos + 2] = fac * (sig_test[2] - p) + (p - dl * bulk * mg)
+            if mf * pressure > cf:  # to DP apex
+                fac = 0.0
+                pressure = cf / mf
+
+            sig_update[ippos] = fac * (sig_test[0] - p) + pressure
+            sig_update[ippos + 1] = fac * (sig_test[1] - p) + pressure
+            sig_update[ippos + 2] = fac * (sig_test[2] - p) + pressure
             sig_update[ippos + 3] = fac * sig_test[3]
             sig_update[ippos + 4] = fac * sig_test[4]
             sig_update[ippos + 5] = fac * sig_test[5]
@@ -1473,8 +1477,6 @@ def pasteResults(doc, elNodes, nocoord, interface_elements, dis, tet10stress, te
     resVol.NodeStressYZ = tet10stress.T[5].T.tolist()
     resVol.Peeq = tet10peeq.T.tolist()
 
-
-
     resVol.Mesh = result_mesh_object_1
     resVol.NodeNumbers = [int(key) for key in resVol.Mesh.FemMesh.Nodes.keys()]
 
@@ -1551,7 +1553,6 @@ def pasteResults(doc, elNodes, nocoord, interface_elements, dis, tet10stress, te
     # Add von Mises Stress and Plastic Strain Ratio to the results
     rt.add_von_mises(resVol)
     rt.add_principal_stress_std(resVol)
-
 
     doc.recompute()
 
