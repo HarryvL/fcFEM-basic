@@ -1187,9 +1187,21 @@ def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, phi, psi,
             sig_mises = np.sqrt(1.5 * ((sig_test[0] - p) ** 2 + (sig_test[1] - p) ** 2 + (sig_test[2] - p) ** 2) +
                                 3.0 * (sig_test[3] ** 2 + sig_test[4] ** 2 + sig_test[5] ** 2))
 
-            mf = 6.0 * sphi / (3.0 - sphi)
-            mg = 6.0 * spsi / (3.0 - spsi)
-            cf = 3.0 * sig_yield * cphi / (3.0 - sphi)
+            # DP circumscribes MC:
+            # mf = 6.0 * sphi / (3.0 - sphi)
+            # mg = 6.0 * spsi / (3.0 - spsi)
+            # cf = 3.0 * sig_yield * cphi / (3.0 - sphi)
+
+            # DP inscribes MC:
+            # mf = 6.0 * sphi / (3.0 + sphi)
+            # mg = 6.0 * spsi / (3.0 + spsi)
+            # cf = 3.0 * sig_yield * cphi / (3.0 + sphi)
+
+            # DP averages MC:
+            mf = 18.0 * sphi / (9.0 - sphi ** 2)
+            mg = 18.0 * spsi / (9.0 - spsi ** 2)
+            cf = 9.0 * sig_yield * cphi / (9.0 - sphi ** 2)
+
             ct = cf - mf * ts
             if ct < 0.0: ct = 0.0
 

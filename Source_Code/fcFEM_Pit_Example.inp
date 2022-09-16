@@ -1,5 +1,5 @@
 -20.0e-06		# gravity: specific gravity acting in z-direction [N/mm3] = [1.0e+6 kN/m3]
-0.02  			# sig_yield: yield stress [MPa] for volume elements (von Mises material)
+0.02  			# sig_yield: yield stress (= 2 * cohesion) [MPa] for volume elements (von Mises and Drucker-Prager material)
 1.  			# shr_yield: yield stress [MPa] for interface elements (Cohesive material)
 1.0   			# kn: interface elastic normal stiffness factor (0.0 < kn <1.0)
 1.0   			# ks: interface elastic shear stiffness factor (0.0 < ks <1.0)
