@@ -6,11 +6,12 @@
 -100000  		# out_disp: +n: output total discplacment at step n ; -n: output incremental discplacement at step n (if n>last step then n=last step)
 10  			# nstep: number of load steps per run (default = 10). nstep == 1: elastic analysis
 20  			# iterat_max: max number of iterations per step - this triggers a scale-down and restart
-1.0e-03  		# error_max: convergence tolerance (default = 1.0e-03)
+1.0e-04  		# error_max: convergence tolerance (default = 1.0e-03)
 1.2  			# relax: numerical over-relaxation (1.0 < relax < 1.5; default = 1.2)
 2.0  			# scale_re: scale factor for re-start (default = 2.0)
 1.2  			# scale_up: scale up for fast convergence (default = 1.2)
 1.2  			# scale_dn: scale down for slow convergence (default = 1.2)
-0.0			# friction angle (in degrees)
+30.0			# friction angle (in degrees)
 0.0			# dilation angle (in degrees)
 1000.			# tensile strength [MPa]
+2			# material model (1 = von Mises / Drucker Prager, 2 = Mohr Coulomb)

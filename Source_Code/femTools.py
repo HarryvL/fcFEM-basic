@@ -764,7 +764,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
              scale_up, scale_dn,
              sig_yield, phi, psi, ts, shr_yield, kn,
              ks, out_disp, link0, link1,
-             elMat, loadFaces, gravity, pressure, ks_red):
+             elMat, loadFaces, gravity, pressure, ks_red, mmod):
     ndof = len(glv)
     nelem = len(elNodes)
 
@@ -816,7 +816,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
                                                                                     np.array(interface_elements),
                                                                                     trac[0], kmax, kn, ks, shr_yield,
                                                                                     sig[0],
-                                                                                    peeq[0], link0, link1, ks_red)
+                                                                                    peeq[0], link0, link1, ks_red, mmod)
         qelastic *= movdof
         qelnorm = np.linalg.norm(qelastic)
         qnorm = qelnorm
@@ -853,7 +853,8 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
                                                                                    np.array(interface_elements),
                                                                                    trac[step], kmax, kn, ks, shr_yield,
                                                                                    sig[step],
-                                                                                   peeq[step], link0, link1, ks_red)
+                                                                                   peeq[step], link0, link1, ks_red,
+                                                                                   mmod)
 
             sig = np.append(sig, np.array([sig_update]), axis=0)
 
@@ -909,7 +910,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
                                                                                        trac[step], kmax, kn, ks,
                                                                                        shr_yield,
                                                                                        sig[step], peeq[step], link0,
-                                                                                       link1, ks_red)
+                                                                                       link1, ks_red, mmod)
 
                 sig[step + 1] = np.array([sig_update])
 
@@ -946,7 +947,7 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
                                                                                            shr_yield,
                                                                                            sig[step], peeq[step], link0,
                                                                                            link1,
-                                                                                           ks_red)
+                                                                                           ks_red, mmod)
 
                     sig[step + 1] = np.array([sig_update])
 
@@ -964,7 +965,8 @@ def calcDisp(elNodes, nocoord, dispfaces, materialbyElement, interface_elements,
             disp = np.append(disp, [disp[step] + du], axis=0)
             dl = lbd[step + 1] - lbd[step]
             if max(movdof) == 1:
-                rfl = np.append(rfl, np.linalg.norm(qin) / qelnorm)
+                # rfl = np.append(rfl, np.linalg.norm(movdof * qin) / qelnorm)
+                rfl = np.append(rfl, np.sum(movdof * qin))
 
             if iterat > 10:
                 # scale down
@@ -1025,7 +1027,7 @@ def plot(un, lbd):
     fig, ax = plt.subplots()
     plt.subplots_adjust(bottom=0.2)
     ax.plot(un, lbd, '-ok')
-    ax.set(xlabel='displacement [mm]', ylabel='load factor [-]',
+    ax.set(xlabel='displacement [mm]', ylabel='load factor [-] / load [N]',
            title='')
     ax.grid()
     axstop = plt.axes([0.7, 0.05, 0.1, 0.075])
@@ -1108,7 +1110,7 @@ def bcGSM(gsm, glv, dis):
 
 @jit(nopython=True, cache=True, nogil=True)
 def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, phi, psi, ts, du,
-                       interface_elements, trac, kmax, kn, ks, shr_yield, sig, peeq, link0, link1, ks_red):
+                       interface_elements, trac, kmax, kn, ks, shr_yield, sig, peeq, link0, link1, ks_red, mmod):
     gp10, gp6 = gaussPoints()
     np10, np6 = nodalPoints()
 
@@ -1182,51 +1184,14 @@ def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, phi, psi,
             sig_test[4] += sig[ippos + 4]
             sig_test[5] += sig[ippos + 5]
 
-            # von Mises stress
-            p = (sig_test[0] + sig_test[1] + sig_test[2]) / 3.0
-            sig_mises = np.sqrt(1.5 * ((sig_test[0] - p) ** 2 + (sig_test[1] - p) ** 2 + (sig_test[2] - p) ** 2) +
-                                3.0 * (sig_test[3] ** 2 + sig_test[4] ** 2 + sig_test[5] ** 2))
-
-            # DP circumscribes MC:
-            # mf = 6.0 * sphi / (3.0 - sphi)
-            # mg = 6.0 * spsi / (3.0 - spsi)
-            # cf = 3.0 * sig_yield * cphi / (3.0 - sphi)
-
-            # DP inscribes MC:
-            # mf = 6.0 * sphi / (3.0 + sphi)
-            # mg = 6.0 * spsi / (3.0 + spsi)
-            # cf = 3.0 * sig_yield * cphi / (3.0 + sphi)
-
-            # DP averages MC:
-            mf = 18.0 * sphi / (9.0 - sphi ** 2)
-            mg = 18.0 * spsi / (9.0 - spsi ** 2)
-            cf = 9.0 * sig_yield * cphi / (9.0 - sphi ** 2)
-
-            ct = cf - mf * ts
-            if ct < 0.0: ct = 0.0
-
-            # radial stress return to yield surface
-            fe = sig_mises + mf * p - cf
-            if fe < 0.0: fe = 0.0
-            dl = fe / (3.0 * G + bulk * mf * mg)
-            fac = 1.0 - 3.0 * G * dl / sig_mises
-            pressure = (p - dl * bulk * mg)
-
-            if mf * pressure > cf:  # to DP apex
-                fac = 0.0
-                pressure = cf / mf
-
-            sig_update[ippos] = fac * (sig_test[0] - p) + pressure
-            sig_update[ippos + 1] = fac * (sig_test[1] - p) + pressure
-            sig_update[ippos + 2] = fac * (sig_test[2] - p) + pressure
-            sig_update[ippos + 3] = fac * sig_test[3]
-            sig_update[ippos + 4] = fac * sig_test[4]
-            sig_update[ippos + 5] = fac * sig_test[5]
+            if mmod == 1:  # von Mises / Drucker Prager
+                sig_update, peeq_update = vmises(ippos, ippos_eq, sig_test, sig_update, peeq, peeq_update, G, bulk,
+                                                 sig_yield, sphi, spsi, cphi, ts)
+            if mmod == 2:  # Mohr Coulomb
+                sig_update = mcoulomb(ippos, sig_test, sig_update, G, bulk, nu,
+                                      sig_yield, sphi, spsi, cphi, ts)
 
             elv += np.dot(bmat.T, sig_update[ippos:ippos + 6]) * ip[3] * abs(xsj)
-
-            # equivalent plastic strain peeq
-            peeq_update[ippos_eq] = peeq[ippos_eq] + max(sig_mises - sig_yield, 0.0) / G / 3.0
 
         for i in range(10):
             iglob = nodes[i] - 1
@@ -1328,6 +1293,162 @@ def update_stress_load(elNodes, nocoord, materialbyElement, sig_yield, phi, psi,
                 qin[n3b + i] -= flink
 
     return sig_update, peeq_update, trac_update, qin, ks_red
+
+
+@jit(nopython=True, cache=True, nogil=True)
+def vmises(ippos, ippos_eq, sig_test, sig_update, peeq, peeq_update, G, bulk, sig_yield, sphi, spsi, cphi, ts):
+    p = (sig_test[0] + sig_test[1] + sig_test[2]) / 3.0
+    sig_mises = np.sqrt(1.5 * ((sig_test[0] - p) ** 2 + (sig_test[1] - p) ** 2 + (sig_test[2] - p) ** 2) +
+                        3.0 * (sig_test[3] ** 2 + sig_test[4] ** 2 + sig_test[5] ** 2))
+
+    # DP fit MC at triaxial compression ridge:
+    # mf = 6.0 * sphi / (3.0 - sphi)
+    # mg = 6.0 * spsi / (3.0 - spsi)
+    # cf = 3.0 * sig_yield * cphi / (3.0 - sphi)
+
+    # DP fit MC at triaxial extension ridge:
+    mf = 6.0 * sphi / (3.0 + sphi)
+    mg = 6.0 * spsi / (3.0 + spsi)
+    cf = 3.0 * sig_yield * cphi / (3.0 + sphi)
+
+    # DP averages MC:
+    # mf = 18.0 * sphi / (9.0 - sphi ** 2)
+    # mg = 18.0 * spsi / (9.0 - spsi ** 2)
+    # cf = 9.0 * sig_yield * cphi / (9.0 - sphi ** 2)
+
+    ct = cf - mf * ts
+    if ct < 0.0: ct = 0.0
+
+    # radial stress return to yield surface
+    fe = sig_mises + mf * p - cf
+    if fe < 0.0: fe = 0.0
+    dl = fe / (3.0 * G + bulk * mf * mg)
+    fac = 1.0 - 3.0 * G * dl / sig_mises
+    pressure = (p - dl * bulk * mg)
+
+    if mf * pressure > cf:  # to DP apex
+        fac = 0.0
+        pressure = cf / mf
+
+    sig_update[ippos] = fac * (sig_test[0] - p) + pressure
+    sig_update[ippos + 1] = fac * (sig_test[1] - p) + pressure
+    sig_update[ippos + 2] = fac * (sig_test[2] - p) + pressure
+    sig_update[ippos + 3] = fac * sig_test[3]
+    sig_update[ippos + 4] = fac * sig_test[4]
+    sig_update[ippos + 5] = fac * sig_test[5]
+
+    # equivalent plastic strain peeq
+    peeq_update[ippos_eq] = peeq[ippos_eq] + max(sig_mises - sig_yield, 0.0) / G / 3.0
+
+    return sig_update, peeq_update
+
+
+@jit(nopython=True, cache=True, nogil=True)
+def mcoulomb(ippos, sig_test, sig_update, G, bulk, nu, sig_yield, sphi, spsi, cphi, ts):
+    ps1, ps2, ps3, psdir = calculate_principal_stress(sig_test)
+
+    mu1 = G * (1.0 + sphi * spsi / (1.0 - 2.0 * nu))
+    ddgds1 = G * (1.0 + spsi / (1.0 - 2.0 * nu))
+    ddgds2 = 2.0 * G * nu * spsi / (1.0 - 2.0 * nu)
+    ddgds3 = G * (-1.0 + spsi / (1.0 - 2.0 * nu))
+
+    femc = (ps1 - ps3) + (ps1 + ps3) * sphi - sig_yield * cphi
+    femc *= 0.5
+    if femc < 0.0: femc = 0.0
+
+    dl = femc / mu1
+
+    ps1r = ps1 - dl * ddgds1
+    ps2r = ps2 - dl * ddgds2
+    ps3r = ps3 - dl * ddgds3
+
+    # apex = max(ps1r, ps2r, ps3r) * sphi > 0.5 * sig_yield * cphi  # test for apex
+    apex = (ps1r + ps3r) * sphi > sig_yield * cphi  # test for apex
+
+    if apex:
+        ps1 = ps2 = ps3 = 0.5 * sig_yield * cphi / sphi
+    else:
+        ridge12 = ps2r > 1.0000001 * ps1r  # test for ps1 = ps2 ridge
+        ridge23 = 1.0000001 * ps2r < ps3r  # test for ps2 = ps3 ridge
+
+        if ridge12:
+            femctc = (ps2 - ps3) + (ps2 + ps3) * sphi - sig_yield * cphi
+            femctc *= 0.5
+            mu2 = 0.5 * G * (1.0 - sphi - spsi +
+                             sphi * spsi * (1.0 + 2.0 * nu) / (1.0 - 2.0 * nu))
+            dl1 = (mu1 * femc - mu2 * femctc) / (
+                    mu1 ** 2 - mu2 ** 2)
+            dl2 = (mu1 * femctc - mu2 * femc) / (
+                    mu1 ** 2 - mu2 ** 2)
+            ps1 = ps1 - dl1 * ddgds1 - dl2 * ddgds2
+            ps2 = ps2 - dl1 * ddgds2 - dl2 * ddgds1
+            ps3 = ps3 - (dl1 + dl2) * ddgds3
+
+        if ridge23:
+            femcte = (ps1 - ps2) + (ps1 + ps2) * sphi - sig_yield * cphi
+            femcte *= 0.5
+            mu2 = 0.5 * G * (1.0 + sphi + spsi +
+                             sphi * spsi * (1.0 + 2.0 * nu) / (1.0 - 2.0 * nu))
+            dl1 = (mu1 * femc - mu2 * femcte) / (
+                    mu1 ** 2 - mu2 ** 2)
+            dl2 = (mu1 * femcte - mu2 * femc) / (
+                    mu1 ** 2 - mu2 ** 2)
+            ps1 = ps1 - (dl1 + dl2) * ddgds1
+            ps2 = ps2 - dl1 * ddgds2 - dl2 * ddgds3
+            ps3 = ps3 - dl1 * ddgds3 - dl2 * ddgds2
+
+        if not ridge12 and not ridge23:  # regular return
+            ps1 = ps1r
+            ps2 = ps2r
+            ps3 = ps3r
+
+    # f = (ps1 - ps3) + (ps1 + ps3) * sphi - sig_yield * cphi
+    # if f > 1.0e-6: print("WARNING: f= ", f)
+
+    sig_update = cartesian(sig_update, ippos, ps1, ps2, ps3, psdir)
+
+    return sig_update
+
+
+@jit(nopython=True, cache=True, nogil=True)
+def calculate_principal_stress(stress_tensor):
+    s11 = stress_tensor[0]  # Sxx
+    s22 = stress_tensor[1]  # Syy
+    s33 = stress_tensor[2]  # Szz
+    s12 = stress_tensor[3]  # Sxy
+    s31 = stress_tensor[4]  # Szx
+    s23 = stress_tensor[5]  # Syz
+    sigma = np.array([
+        [s11, s12, s31],
+        [s12, s22, s23],
+        [s31, s23, s33]
+    ])
+
+    eigenvalues, eigenvectors = np.linalg.eig(sigma)
+
+    eigenvalues = eigenvalues.real
+    eigenvectors = eigenvectors.real
+
+    idx = eigenvalues.argsort()[::-1]
+    eigenvalues = eigenvalues[idx]
+    eigenvectors = eigenvectors[:, idx]
+
+    return (eigenvalues[0], eigenvalues[1], eigenvalues[2], eigenvectors)
+
+
+@jit(nopython=True, cache=True, nogil=True)
+def cartesian(sig_update, ippos, ps1, ps2, ps3, psdir):
+    sig_update[ippos + 0] = psdir[0, 0] ** 2 * ps1 + psdir[0, 1] ** 2 * ps2 + psdir[0, 2] ** 2 * ps3
+    sig_update[ippos + 1] = psdir[1, 0] ** 2 * ps1 + psdir[1, 1] ** 2 * ps2 + psdir[1, 2] ** 2 * ps3
+    sig_update[ippos + 2] = psdir[2, 0] ** 2 * ps1 + psdir[2, 1] ** 2 * ps2 + psdir[2, 2] ** 2 * ps3
+    sig_update[ippos + 3] = psdir[0, 0] * psdir[1, 0] * ps1 + psdir[0, 1] * psdir[1, 1] * ps2 + psdir[0, 2] * \
+                            psdir[1, 2] * ps3
+    sig_update[ippos + 4] = psdir[0, 0] * psdir[2, 0] * ps1 + psdir[0, 1] * psdir[2, 1] * ps2 + psdir[0, 2] * \
+                            psdir[2, 2] * ps3
+    sig_update[ippos + 5] = psdir[1, 0] * psdir[2, 0] * ps1 + psdir[1, 1] * psdir[2, 1] * ps2 + psdir[1, 2] * \
+                            psdir[2, 2] * ps3
+
+    return sig_update
 
 
 # map stresses to nodes

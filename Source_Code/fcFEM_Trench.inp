@@ -14,3 +14,4 @@
 30.0			# friction angle (in degrees)
 0.0			# dilation angle (in degrees)
 1000.			# tensile strength [MPa]
+2			# material model (1 = von Mises / Drucker Prager, 2 = Mohr Coulomb)

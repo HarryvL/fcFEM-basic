@@ -12,5 +12,6 @@
 1.2  			# scale_up: scale up for fast convergence (default = 1.2)
 1.2  			# scale_dn: scale down for slow convergence (default = 1.2)
 30.0			# friction angle (in degrees)
-0.0			# dilation angle (in degrees)
+30.0			# dilation angle (in degrees)
 1000.			# tensile strength [MPa]
+2			# material model (1 = von Mises / Drucker Prager, 2 = Mohr Coulomb)
