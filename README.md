@@ -18,6 +18,10 @@ fcFEM is a finite element solver for performing collapse analysis of structures 
 
 <img src="https://github.com/HarryvL/fcFEM-basic/blob/main/Pictures/Plate_with_Hole_3.png" height="200"/>
 
+### Dependencies
+fcFEM imports from the following packages: numpy, scipy, numba, matplotlib and scikit-sparse. These packages are all available on conda-forge and can be installed with conda or mamba.
+
+
 ### Documentation
 Please refer to source code for in-line comments and to the FreeCAD forum (https://forum.freecadweb.org/viewforum.php?f=18)
 
