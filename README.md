@@ -20,15 +20,15 @@ fcFEM is a finite element solver for performing collapse analysis of structures 
 
 ### Dependencies
 fcFEM imports (from) the following packages: numpy, scipy, numba, matplotlib and scikit-sparse. On Linux and Mac-OS systems these can be installed with the usual package managers. On Windows this requires more effort:
-1. download Miniforge: https://github.com/conda-forge/miniforg ... x86_64.exe
-1. run the installer: Miniforge-pypy3-Windows-x86_64.exe
+1. download Miniforge3: [Miniforge3](https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe)
+1. run the installer: Miniforge3-Windows-x86_64.exe
 1. find and run Miniforge on your system - this opens a Miniforge Prompt: (base) C:\"path">
 1. create a new virtual environment: (base) C:\"path"> mamba create --name fcFEM (or any other name of your choice)
 1. change into the new environment: (base) C:\"path"> mamba activate fcFEM (or the other name you chose)
 1. instal freeCAD and dependencies: (fcFEM) C:\"path"> mamba install freeCAD scipy numba matplotlib scikit-sparse (with spaces and no commas)
 1. check with python if the dependencies can be imported: (fcFEM) C:\"path"> python
-1. >>> import scipy.sparse
-1. >>> import sksparse.cholmod
+1. \>>> import scipy.sparse
+1. \>>> import sksparse.cholmod
 1. if no problems quit python and start freecad: (fcFEM) C:\"path"> freecad
 
 ### Documentation
