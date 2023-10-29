@@ -278,7 +278,8 @@ def setUpInput(doc, mesh, analysis):
                             prim]  # add new interface nodes to the BC face, if they are embedded in the same primitive as the "internal nodes"
             if bcnodes: dispfaces.append([bcnodes, bctype, bcvalue])
 
-    dispfaces.append([list(twins.keys()), [False, False, False], [0, 0, 0]])  # immobilize interface reference nodes
+    u0 = Units.Quantity(0.0,1)
+    dispfaces.append([list(twins.keys()), [False, False, False], [u0, u0, u0]])  # immobilize interface reference nodes
 
     lf = [[0, 0, 0, 0, 0, 0]]  # load face nodes - signature for numba
     pr = [0]  # load face pressure - signature for numba
