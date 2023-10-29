@@ -30,6 +30,7 @@ import Part as Part
 import FreeCAD as App
 from numba import jit
 import FreeCADGui as Gui
+from FreeCAD import Units
 import scipy.sparse as scsp
 import matplotlib.pyplot as plt
 from femtools import membertools
@@ -1064,17 +1065,17 @@ def bcGSM(gsm, glv, dis):
         ux = uy = uz = 0.0
 
         if not lx:
-            ux = float(lf[2][0])  # prescribed displacement in x-direction
+            ux = lf[2][0].Value  # prescribed displacement in x-direction
             if ux != 0.0:
                 for node in lf[0]:
                     movdof[3 * (int(node) - 1)] = 1
         if not ly:
-            uy = float(lf[2][1])  # prescribed displacement in y-direction
+            uy = lf[2][1].Value  # prescribed displacement in y-direction
             if uy != 0.0:
                 for node in lf[0]:
                     movdof[3 * (int(node) - 1) + 1] = 1
         if not lz:
-            uz = float(lf[2][2])  # prescribed displacement in z-direction
+            uz = lf[2][2].Value  # prescribed displacement in z-direction
             if uz != 0.0:
                 for node in lf[0]:
                     movdof[3 * (int(node) - 1) + 2] = 1
